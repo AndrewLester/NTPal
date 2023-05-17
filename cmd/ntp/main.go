@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -25,12 +24,12 @@ func main() {
 		host = ""
 	}
 
-	udp, err := net.ListenPacket("udp", fmt.Sprintf("%s:%s", host, port))
-	if err != nil {
-		log.Fatalf("can't listen on %s/udp: %s", port, err)
-	}
+	// udp, err := net.ListenPacket("udp", fmt.Sprintf("%s:%s", host, port))
+	// if err != nil {
+	// 	log.Fatalf("can't listen on %s/udp: %s", port, err)
+	// }
 
-	handleUDP(udp)
+	// handleUDP(udp)
 }
 
 func handleUDP(c net.PacketConn) {
