@@ -8,8 +8,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY . /app/
-RUN ls
-RUN echo $GOPATH
+RUN rm -rf .git
 RUN make
 
-ENTRYPOINT ["entry.sh"]
+ENTRYPOINT ["/app/entry.sh"]
