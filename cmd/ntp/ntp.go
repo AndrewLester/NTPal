@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"net"
 	"net/netip"
 	"os"
@@ -26,6 +27,10 @@ const halfEraLength int64 = 65536         // 2^16
 const eraLength int64 = 4_294_967_296     // 2^32
 const unixEraOffset int64 = 2_208_988_800 // 1970 - 1900 in seconds
 
+const SGATE = 3     /* spike gate (clock filter */
+const BDELAY = .004 /* broadcast delay (s) */
+const PHI = 15e-6   /* % frequency tolerance (15 ppm) */
+
 type Mode byte
 
 const (
@@ -39,25 +44,28 @@ const (
 	RESERVED_PRIVAT_EUSE
 )
 
+type DispatchCode int
+
+const ERR DispatchCode = -1
 const (
-	NEWPS = "NEWPS"
-	DSCRD = "DSCRD"
-	FXMIT = "FXMIT"
-	MANY  = "MANY"
-	NEWBC = "NEWBC"
-	PROC  = "PROC"
-	ERR   = "ERR"
+	DSCRD = iota
+	PROC
+	BCST
+	FXMIT
+	MANY
+	NEWPS
+	NEWBC
 )
 
 // Index with [associationMode][packetMode]
-var dispatchTable = [][]string{
-	{"NEWPS", "DSCRD", "FXMIT", "MANY", "NEWBC"},
-	{"PROC", "PROC", "DSCRD", "DSCRD", "DSCRD"},
-	{"PROC", "ERR", "DSCRD", "DSCRD", "DSCRD"},
-	{"DSCRD", "DSCRD", "DSCRD", "PROC", "DSCRD"},
-	{"DSCRD", "DSCRD", "DSCRD", "DSCRD", "DSCRD"},
-	{"DSCRD", "DSCRD", "DSCRD", "DSCRD", "DSCRD"},
-	{"DSCRD", "DSCRD", "DSCRD", "DSCRD", "PROC"},
+var dispatchTable = [][]DispatchCode{
+	{NEWPS, DSCRD, FXMIT, MANY, NEWBC},
+	{PROC, PROC, DSCRD, DSCRD, DSCRD},
+	{PROC, ERR, DSCRD, DSCRD, DSCRD},
+	{DSCRD, DSCRD, DSCRD, PROC, DSCRD},
+	{DSCRD, DSCRD, DSCRD, DSCRD, DSCRD},
+	{DSCRD, DSCRD, DSCRD, DSCRD, DSCRD},
+	{DSCRD, DSCRD, DSCRD, DSCRD, PROC},
 }
 
 type NTPDate struct {
@@ -112,7 +120,7 @@ type Association struct {
 	// Values set by received packet
 	ReceivePacket
 
-	reach int
+	reach byte
 }
 
 // Fields that can be read directly from the packet bytes
@@ -317,18 +325,18 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	 * order to avoid violating the Principle of Least Astonishment,
 	 * the delay is clamped not less than the system precision.
 	 */
-	if association.pmode == M_BCST {
-		offset = LFP2D(packet.xmt - packet.dst)
+	if association.mode == BROADCAST_SERVER {
+		offset = NTPTimestampEncodedToDouble(packet.xmt - packet.dst)
 		delay = BDELAY
-		disp = LOG2D(packet.precision) + LOG2D(s.precision) + PHI*
+		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
 			2*BDELAY
 	} else {
-		offset = (LFP2D(packet.rec-packet.org) + LFP2D(packet.dst-
+		offset = (NTPTimestampEncodedToDouble(packet.rec-packet.org) + NTPTimestampEncodedToDouble(packet.dst-
 			packet.xmt)) / 2
-		delay = max(LFP2D(packet.dst-packet.org)-LFP2D(packet.rec-
-			packet.xmt), LOG2D(system.precision))
-		disp = LOG2D(packet.precision) + LOG2D(system.precision) + PHI*
-			LFP2D(packet.dst-packet.org)
+		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.org)-NTPTimestampEncodedToDouble(packet.rec-
+			packet.xmt), Log2ToDouble(system.precision))
+		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
+			NTPTimestampEncodedToDouble(packet.dst-packet.org)
 	}
 	clock_filter(association, offset, delay, disp)
 }
@@ -402,6 +410,17 @@ func UnixToNTPTimestampEncoded(time syscall.Timeval) NTPTimestampEncoded {
 
 func DoubleToNTPTimestampEncoded(offset float64) NTPTimestampEncoded {
 	return NTPTimestampEncoded(offset * float64(eraLength))
+}
+
+func NTPTimestampEncodedToDouble(ntpTimestamp NTPTimestampEncoded) float64 {
+	return float64(ntpTimestamp) / float64(eraLength)
+}
+
+func Log2ToDouble(a int8) float64 {
+	if a < 0 {
+		return 1.0 / float64(int32(1)<<-a)
+	}
+	return float64(int32(1) << a)
 }
 
 func TimeToNTPDate(time time.Time) NTPDate {
