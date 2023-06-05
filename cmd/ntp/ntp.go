@@ -23,13 +23,32 @@ const NOSYNC byte = 0x3  // leap unsync
 const MAXDIST byte = 1   // distance threshold (1 s)
 const MAXSTRAT byte = 16 // maximum stratum number
 
-const halfEraLength int64 = 65536         // 2^16
+const NTPShortLength int64 = 65536        // 2^16
 const eraLength int64 = 4_294_967_296     // 2^32
 const unixEraOffset int64 = 2_208_988_800 // 1970 - 1900 in seconds
 
 const SGATE = 3     /* spike gate (clock filter */
 const BDELAY = .004 /* broadcast delay (s) */
 const PHI = 15e-6   /* % frequency tolerance (15 ppm) */
+const NSTAGE = 8    /* clock register stages */
+const NMAX = 50     /* maximum number of peers */
+const NSANE = 1     /* % minimum intersection survivors */
+const NMIN = 3      /* % minimum cluster survivors */
+
+const UNREACH = 12 /* unreach counter threshold */
+const BCOUNT = 8   /* packets in a burst */
+const BTIME = 2    /* burst interval (s) */
+
+const STEPT = .128      /* step threshold (s) */
+const WATCH = 900       /* stepout threshold (s) */
+const PANICT = 1000     /* panic threshold (s) */
+const PLL = 65536       /* PLL loop gain */
+const FLL = MAXPOLL + 1 /* FLL loop gain */
+const AVG = 4           /* parameter averaging constant */
+const ALLAN = 1500      /* compromise Allan intercept (s) */
+const LIMIT = 30        /* poll-adjust threshold */
+const MAXFREQ = 500e-6  /* frequency tolerance (500 ppm) */
+const PGATE = 4         /* poll-adjust gate */
 
 type Mode byte
 
@@ -48,7 +67,7 @@ type DispatchCode int
 
 const ERR DispatchCode = -1
 const (
-	DSCRD = iota
+	DSCRD DispatchCode = iota
 	PROC
 	BCST
 	FXMIT
@@ -104,23 +123,60 @@ type NTPSystem struct {
 	reftime      NTPTimestampEncoded /* reference time */
 	m            [NMAX]M             /* chime list */
 	v            [NMAX]V             /* survivor list */
-	p            *P                  /* association ID */
+	p            *Association        /* association ID */
 	offset       float64             /* combined offset */
 	jitter       float64             /* combined jitter */
 	flags        int                 /* option flags */
 	n            int                 /* number of survivors */
-	associations map[netip.AddrPort]*Association
+	associations []*Association
+	clock        Clock
 }
 
 type Association struct {
 	leap  byte /* leap indicator */
-	hmode byte // HOST (Self) mode
-	hpoll int8
-
+	hmode Mode // HOST (Self) mode
 	// Values set by received packet
 	ReceivePacket
 
-	reach byte
+	/*
+	 * Computed data
+	 */
+	t      float64             /* update time */
+	f      [NSTAGE]FilterStage /* clock filter */
+	offset float64             /* peer offset */
+	delay  float64             /* peer delay */
+	disp   float64             /* peer dispersion */
+	jitter float64             /* RMS jitter */
+
+	/*
+	 * Poll process variables
+	 */
+	hpoll    int8
+	reach    byte
+	burst    int
+	ttl      int
+	unreach  int
+	outdate  int32
+	nextdate int32
+}
+
+// "t" is process time, not realtime. Only second incrementing
+type Clock struct {
+	t      NTPTimestampEncoded
+	state  int
+	offset float64
+	last   float64
+	count  int
+	freq   float64
+	jitter float64
+	wander float64
+}
+
+type FilterStage struct {
+	t      NTPTimestampEncoded /* update time */
+	offset float64             /* clock ofset */
+	delay  float64             /* roundtrip delay */
+	disp   float64             /* dispersion */
 }
 
 // Fields that can be read directly from the packet bytes
@@ -170,10 +226,172 @@ type TransmitPacket struct {
 	EncodedReceivePacket
 }
 
-func SetupAsssociation(server string, wg *sync.WaitGroup) {
-	wg.Add(2)
-	go SetupPeer()
-	go SetupPoll()
+func (system *NTPSystem) SetupAsssociations(associations []*Association, wg *sync.WaitGroup) {
+	system.associations = associations
+	wg.Add(1)
+	// go SetupPeer()
+	go func() {
+		for {
+			system.clockAdjust()
+			time.Sleep(time.Duration(1) * time.Second)
+		}
+	}()
+}
+
+func (system *NTPSystem) clockAdjust() {
+
+	/*
+	 * Update the process time c.t.  Also increase the dispersion
+	 * since the last update.  In contrast to NTPv3, NTPv4 does not
+	 * declare unsynchronized after one day, since the dispersion
+	 * threshold serves this function.  When the dispersion exceeds
+	 * MAXDIST (1 s), the server is considered unfit for
+	 * synchronization.
+	 */
+	system.clock.t++
+	system.rootdisp += PHI
+
+	/*
+	 * Implement the phase and frequency adjustments.  The gain
+	 * factor (denominator) is not allowed to increase beyond the
+	 * Allan intercept.  It doesn't make sense to average phase
+	 * noise beyond this point and it helps to damp residual offset
+	 * at the longer poll intervals.
+	 */
+	dtemp := system.clock.offset / (float64(PLL) * math.Min(Log2ToDouble(system.poll), float64(ALLAN)))
+	system.clock.offset -= dtemp
+
+	/*
+	 * This is the kernel adjust time function, usually implemented
+	 * by the Unix adjtime() system call.
+	 */
+	adjust_time(system.clock.freq + dtemp)
+
+	/*
+	 * Peer timer.  Call the poll() routine when the poll timer
+	 * expires.
+	 */
+	for _, association := range system.associations {
+		if system.clock.t >= uint64(association.nextdate) {
+			system.sendPoll(association)
+		}
+	}
+
+	/*
+		TODO
+		 * Once per hour, write the clock frequency to a file.
+	*/
+	/*
+	 * if (c.t % 3600 == 3599)
+	 *   write c.freq to file
+	 */
+}
+
+func (system *NTPSystem) sendPoll(association *Association) {
+	/*
+	 * This routine is called when the current time c.t catches up
+	 * to the next poll time p->nextdate.  The value p->outdate is
+	 * the last time this routine was executed.  The poll_update()
+	 * routine determines the next execution time p->nextdate.
+	 *
+	 * If broadcasting, just do it, but only if we are synchronized.
+	 */
+	hpoll := association.hpoll
+	if association.hmode == BROADCAST_SERVER {
+		association.outdate = system.clock.t
+		if system.p != nil {
+			peer_xmit(association)
+		}
+		system.pollUpdate(association, hpoll)
+		return
+	}
+
+	/*
+	 * If manycasting, start with ttl = 1.  The ttl is increased by
+	 * one for each poll until MAXCLOCK servers have been found or
+	 * ttl reaches TTLMAX.  If reaching MAXCLOCK, stop polling until
+	 * the number of servers falls below MINCLOCK, then start all
+	 * over.
+	 */
+	if association.hmode == M_CLNT && association.flags&P_MANY {
+		association.outdate = system.clock.t
+		if association.unreach > BEACON {
+			association.unreach = 0
+			association.ttl = 1
+			peer_xmit(assocation)
+		} else if s.n < MINCLOCK {
+			if association.ttl < TTLMAX {
+				association.ttl++
+			}
+			peer_xmit(association)
+		}
+
+		association.unreach++
+		poll_update(assocation, hpoll)
+		return
+	}
+	if association.burst == 0 {
+
+		/*
+		 * We are not in a burst.  Shift the reachability
+		 * register to the left.  Hopefully, some time before
+		 * the next poll a packet will arrive and set the
+		 * rightmost bit.
+		 */
+		oreach := association.reach
+		association.outdate = system.clock.t
+		association.reach = assocation.reach << 1
+		if !(association.reach & 0x7) {
+			clock_filter(assocation, 0, 0, MAXDISP)
+		}
+		if !association.reach {
+
+			/*
+			 * The server is unreachable, so bump the
+			 * unreach counter.  If the unreach threshold
+			 * has been reached, double the poll interval
+			 * to minimize wasted network traffic.  Send a
+			 * burst only if enabled and the unreach
+			 * threshold has not been reached.
+			 */
+			if association.flags&P_IBURST && association.unreach == 0 {
+				association.burst = BCOUNT
+			} else if assocation.unreach < UNREACH {
+				association.unreach++
+
+			} else {
+				hpoll++
+			}
+			association.unreach++
+		} else {
+
+			/*
+			 * The server is reachable.  Set the poll
+			 * interval to the system poll interval.  Send a
+			 * burst only if enabled and the peer is fit.
+			 */
+			association.unreach = 0
+			hpoll = s.poll
+			if association.flags&P_BURST && fit(assocation) {
+				association.burst = BCOUNT
+			}
+		}
+	} else {
+		/*
+		 * If in a burst, count it down.  When the reply comes
+		 * back the clock_filter() routine will call
+		 * clock_select() to process the results of the burst.
+		 */
+		association.burst--
+	}
+	/*
+	 * Do not transmit if in broadcast client mode.
+	 */
+	if association.hmode != M_BCLN {
+		peer_xmit(assocation)
+	}
+	poll_update(assocation, hpoll)
+
 }
 
 func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (*ReceivePacket, error) {
@@ -285,8 +503,8 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	}
 	association.mode = packet.mode
 	association.poll = packet.poll
-	association.rootdelay = uint32(float64(packet.rootdelay) / float64(halfEraLength))
-	association.rootdisp = uint32(float64(packet.rootdisp) / float64(halfEraLength))
+	association.rootdelay = uint32(float64(packet.rootdelay) / float64(NTPShortLength))
+	association.rootdisp = uint32(float64(packet.rootdisp) / float64(NTPShortLength))
 	association.refid = packet.refid
 	association.reftime = packet.reftime
 
@@ -301,13 +519,13 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	/*
 	 * Verify valid root distance.
 	 */
-	if packet.rootdelay/2+packet.rootdisp >= uint32(MAXDISP) || association.reftime >
+	if association.rootdelay/2+association.rootdisp >= uint32(MAXDISP) || association.reftime >
 		packet.xmt {
 
 		return /* invalid header values */
 	}
 
-	poll_update(association, association.hpoll)
+	system.pollUpdate(association, association.hpoll)
 	association.reach |= 1
 
 	/*
@@ -331,14 +549,15 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
 			2*BDELAY
 	} else {
-		offset = (NTPTimestampEncodedToDouble(packet.rec-packet.org) + NTPTimestampEncodedToDouble(packet.dst-
-			packet.xmt)) / 2
-		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.org)-NTPTimestampEncodedToDouble(packet.rec-
-			packet.xmt), Log2ToDouble(system.precision))
+		offset = (NTPTimestampEncodedToDouble(packet.rec-packet.org) + NTPTimestampEncodedToDouble(packet.xmt-
+			packet.dst)) / 2
+		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.org)-NTPTimestampEncodedToDouble(packet.xmt-
+			packet.rec), Log2ToDouble(system.precision))
 		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
 			NTPTimestampEncodedToDouble(packet.dst-packet.org)
 	}
-	clock_filter(association, offset, delay, disp)
+
+	system.clockFilter(association, offset, delay, disp)
 }
 
 // TODO: Add auth
@@ -357,8 +576,8 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	}
 	transmitPacket.poll = receivePacket.poll
 	transmitPacket.precision = system.precision
-	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * float64(halfEraLength))
-	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * float64(halfEraLength))
+	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * float64(NTPShortLength))
+	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * float64(NTPShortLength))
 	transmitPacket.refid = system.refid
 	transmitPacket.reftime = system.reftime
 	transmitPacket.org = receivePacket.xmt
@@ -381,6 +600,190 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	// }
 
 	return &transmitPacket
+}
+
+func (system *NTPSystem) pollPeer(association *Association) {
+	var transmitPacket TransmitPacket
+
+	/*
+	 * Initialize header and transmit timestamp
+	 */
+	transmitPacket.srcaddr = association.dstaddr
+	transmitPacket.dstaddr = association.srcaddr
+	transmitPacket.leap = system.leap
+	transmitPacket.version = association.version
+	transmitPacket.mode = association.hmode
+	if system.stratum == MAXSTRAT {
+		transmitPacket.stratum = 0
+	} else {
+		transmitPacket.stratum = system.stratum
+	}
+	transmitPacket.poll = association.hpoll
+	transmitPacket.precision = system.precision
+	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * float64(NTPShortLength))
+	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * float64(NTPShortLength))
+	transmitPacket.refid = system.refid
+	transmitPacket.reftime = system.reftime
+	transmitPacket.org = association.org
+	transmitPacket.rec = association.rec
+	transmitPacket.xmt = GetSystemTime()
+	association.xmt = transmitPacket.xmt
+
+	/*
+	 * If the key ID is nonzero, send a valid MAC using the key ID
+	 * of the association and the key in the local key cache.  If
+	 * something breaks, like a missing trusted key, don't send the
+	 * packet; just reset the association and stop until the problem
+	 * is fixed.
+	 */
+	if association.keyid != 0 {
+		// if (/* p->keyid invalid */ 0) {
+		//         clear(p, X_NKEY);
+		//         return;
+		// }
+		// x.dgst = md5(p->keyid);
+	}
+
+	net.Dial("udp", "")
+	xmit_packet(&x)
+}
+
+func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
+	association.hpoll = int8(math.Max(math.Min(float64(MAXPOLL), float64(poll)), float64(MINPOLL)))
+	if association.burst > 0 {
+		if uint64(association.nextdate) != system.clock.t {
+			return
+		} else {
+			association.nextdate += BTIME
+		}
+	} else {
+		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.poll),
+			float64(association.hpoll)), float64(MINPOLL))))
+	}
+
+	if uint64(association.nextdate) <= system.clock.t {
+		association.nextdate = int32(system.clock.t + 1)
+	}
+}
+
+func (system *NTPSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
+	var f [NSTAGE]FilterStage
+	var dtemp float64
+
+	/*
+	 * The clock filter contents consist of eight tuples (offset,
+	 * delay, dispersion, time).  Shift each tuple to the left,
+	 * discarding the leftmost one.  As each tuple is shifted,
+	 * increase the dispersion since the last filter update.  At the
+	 * same time, copy each tuple to a temporary list.  After this,
+	 * place the (offset, delay, disp, time) in the vacated
+	 * rightmost tuple.
+	 */
+	for i := 1; i < NSTAGE; i++ {
+		association.f[i] = association.f[i-1]
+		association.f[i].disp += PHI * (float64(system.clock.t) - association.t)
+		f[i] = association.f[i]
+	}
+	association.f[0].t = system.clock.t
+	association.f[0].offset = offset
+	association.f[0].delay = delay
+	association.f[0].disp = disp
+	f[0] = association.f[0]
+
+	/*
+	 * Sort the temporary list of tuples by increasing f[].delay.
+	 * The first entry on the sorted list represents the best
+	 * sample, but it might be old.
+	 */
+	dtemp = association.offset
+	association.offset = f[0].offset
+	association.delay = f[0].delay
+	for i := 0; i < NSTAGE; i++ {
+		association.disp += f[i].disp / (math.Pow(2, float64(i+1)))
+		association.jitter += math.Pow((f[i].offset - f[0].offset), 2)
+	}
+	association.jitter = math.Max(math.Sqrt(association.jitter), Log2ToDouble(system.precision))
+
+	/*
+	 * Prime directive: use a sample only once and never a sample
+	 * older than the latest one, but anything goes before first
+	 * synchronized.
+	 */
+	if float64(f[0].t)-association.t <= 0 && system.leap != NOSYNC {
+		return
+	}
+
+	/*
+	 * Popcorn spike suppressor.  Compare the difference between the
+	 * last and current offsets to the current jitter.  If greater
+	 * than SGATE (3) and if the interval since the last offset is
+	 * less than twice the system poll interval, dump the spike.
+	 * Otherwise, and if not in a burst, shake out the truechimers.
+	 */
+	if math.Abs(association.offset-dtemp) > SGATE*association.jitter && (float64(f[0].t)-
+		association.t) < float64(2*system.poll) {
+
+		return
+	}
+
+	association.t = float64(f[0].t)
+	if association.burst == 0 {
+		clock_select()
+	}
+}
+
+/*
+ * fit() - test if association p is acceptable for synchronization
+ */
+func (system *NTPSystem) fit(association *Association) bool {
+	/*
+	 * A stratum error occurs if (1) the server has never been
+	 * synchronized, (2) the server stratum is invalid.
+	 */
+	if association.leap == NOSYNC || association.stratum >= MAXSTRAT {
+		return false
+	}
+
+	/*
+	 * A distance error occurs if the root distance exceeds the
+	 * distance threshold plus an increment equal to one poll
+	 * interval.
+	 */
+	if system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll) {
+		return false
+	}
+
+	/*
+	 * A loop error occurs if the remote peer is synchronized to the
+	 * local peer or the remote peer is synchronized to the current
+	 * system peer.  Note this is the behavior for IPv4; for IPv6
+	 * the MD5 hash is used instead.
+	 */
+	if association.refid == association.dstaddr || association.refid == s.refid {
+
+		return false
+	}
+
+	/*
+	 * An unreachable error occurs if the server is unreachable.
+	 */
+	if association.reach == 0 {
+
+		return false
+	}
+
+	return true
+}
+
+func (system *NTPSystem) rootDist(association *Association) float64 {
+	/*
+	 * The root synchronization distance is the maximum error due to
+	 * all causes of the local clock relative to the primary server.
+	 * It is defined as half the total delay plus total dispersion
+	 * plus peer jitter.
+	 */
+	return (math.Max(MINDISP, assocation.rootdelay+association.delay)/2 +
+		association.rootdisp + association.disp + PHI*(system.clock.t-association.t) + association.jitter)
 }
 
 func GetSystemTime() NTPTimestampEncoded {

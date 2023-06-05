@@ -44,9 +44,7 @@ func main() {
 
 	servers := []string{"time.apple.com", "time.cloudflare.com"}
 
-	for _, server := range servers {
-		SetupAsssociation(server, &wg)
-	}
+	system.SetupAsssociations(associations, &wg)
 
 	wg.Add(1)
 	go handleUDP(udp, system, &wg)
