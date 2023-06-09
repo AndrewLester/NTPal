@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -13,10 +14,15 @@ var MTU = 1300
 
 var PRECISION int8 = -18 /* precision (log2 s)  */
 
+const DEFAULT_CONFIG_PATH = "/etc/ntp.conf"
+
 func main() {
-	// in other programming languages, this might look like:
-	//    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-	//    s.bind("fly-global-services", port)
+	var config string
+	flag.StringVar(&config, "config", DEFAULT_CONFIG_PATH, "Path to the NTP config file.")
+
+	flag.Parse()
+
+	associationConfigs := ParseConfig(config)
 
 	port := os.Getenv("NTP_PORT")
 	if port == "" {
@@ -24,9 +30,6 @@ func main() {
 	}
 
 	host := os.Getenv("NTP_HOST")
-	if host == "" {
-		host = ""
-	}
 
 	system := &NTPSystem{
 		leap:      NOSYNC,
@@ -42,7 +45,7 @@ func main() {
 		log.Fatalf("can't listen on %s/udp: %s", port, err)
 	}
 
-	servers := []string{"time.apple.com", "time.cloudflare.com"}
+	associations := []*Association{&Association{}}
 
 	system.SetupAsssociations(associations, &wg)
 

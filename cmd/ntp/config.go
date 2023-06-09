@@ -1,0 +1,146 @@
+package main
+
+import (
+	"bufio"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+)
+
+type ServerAssociationConfig struct {
+	address string
+	burst   bool
+	iburst  bool
+	prefer  bool
+	key     int
+	version int
+	minpoll int
+	maxpoll int
+}
+
+const DEFAULT_MINPOLL = 6
+const DEFAULT_MAXPOLL = 10
+
+func ParseConfig(path string) []*ServerAssociationConfig {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatal("File at", path, "could not be read for configuration:", err)
+	}
+	defer file.Close()
+
+	serverAssociations := []*ServerAssociationConfig{}
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		arguments := strings.Split(line, " ")
+
+		switch arguments[0] {
+		case "server":
+			if len(arguments) < 2 {
+				configParseError("Missing required argument \"address\"")
+			}
+
+			address := arguments[1]
+
+			burst := optionalArgument("burst", &arguments)
+			iburst := optionalArgument("iburst", &arguments)
+			prefer := optionalArgument("prefer", &arguments)
+			key := integerArgument("key", -1, &arguments)
+			version := integerArgument("version", 4, &arguments)
+			minpoll := integerArgument("minpoll", DEFAULT_MINPOLL, &arguments)
+			maxpoll := integerArgument("maxpoll", DEFAULT_MAXPOLL, &arguments)
+
+			if len(arguments) > 2 {
+				configParseError("Invalid arguments supplied to command")
+			}
+
+			if version != int(VERSION) {
+				configParseError("Only NTP version", VERSION, "is supported")
+			}
+
+			if minpoll < int(MINPOLL) {
+				configParseError("minpoll must be greater than or equal to", MINPOLL)
+			}
+
+			if maxpoll > int(MAXPOLL) {
+				configParseError("maxpoll must be less than or equal to", MAXPOLL)
+			}
+
+			if minpoll > maxpoll {
+				configParseError("minpoll must be less than maxpoll")
+			}
+
+			serverAssociation := &ServerAssociationConfig{
+				address: address,
+				burst:   burst,
+				iburst:  iburst,
+				prefer:  prefer,
+				key:     key,
+				version: version,
+				minpoll: minpoll,
+				maxpoll: maxpoll,
+			}
+			serverAssociations = append(serverAssociations, serverAssociation)
+
+		default:
+			configParseError("Invalid command: ", arguments[0])
+		}
+
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	return serverAssociations
+}
+
+func optionalArgument(name string, arguments *[]string) bool {
+	for i, argument := range *arguments {
+		if name == argument {
+			RemoveIndex(arguments, i)
+			return true
+		}
+	}
+	return false
+}
+
+func integerArgument(name string, initial int, arguments *[]string) int {
+	valueStr := stringArgument(name, strconv.Itoa(initial), arguments)
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		configParseError(name, " argument requires an integer value.")
+	}
+
+	return value
+}
+
+func stringArgument(name string, initial string, arguments *[]string) string {
+	for i, argument := range *arguments {
+		if name == argument {
+			if i == len(*arguments)-1 {
+				configParseError("No value supplied for argument: ", argument)
+			}
+
+			value := (*arguments)[i+1]
+			RemoveIndex(arguments, i)
+			RemoveIndex(arguments, i+1)
+			return value
+		}
+	}
+	return initial
+}
+
+func RemoveIndex[T any](s *[]T, index int) {
+	ret := make([]T, 0)
+	ret = append(ret, (*s)[:index]...)
+	ret = append(ret, (*s)[index+1:]...)
+	s = &ret
+}
+
+func configParseError(args ...any) {
+	log.Print("Config parse error: ")
+	log.Fatal(args...)
+}
