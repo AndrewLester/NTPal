@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -10,7 +11,7 @@ import (
 )
 
 type ServerAssociationConfig struct {
-	address net.IP
+	address *net.UDPAddr
 	burst   bool
 	iburst  bool
 	prefer  bool
@@ -24,14 +25,14 @@ type ServerAssociationConfig struct {
 const DEFAULT_MINPOLL = 6
 const DEFAULT_MAXPOLL = 10
 
-func ParseConfig(path string) []*ServerAssociationConfig {
+func ParseConfig(path string) []ServerAssociationConfig {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("File at", path, "could not be read for configuration:", err)
 	}
 	defer file.Close()
 
-	serverAssociations := []*ServerAssociationConfig{}
+	serverAssociations := []ServerAssociationConfig{}
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -44,7 +45,11 @@ func ParseConfig(path string) []*ServerAssociationConfig {
 				configParseError("Missing required argument \"address\"")
 			}
 
-			address := net.ParseIP(arguments[1])
+			address, err := net.ResolveUDPAddr("udp", arguments[1]+":123")
+			if err != nil {
+				configParseError("Invalid address")
+			}
+			fmt.Println(arguments[1], "resolved to:", address.IP)
 
 			burst := optionalArgument("burst", &arguments)
 			iburst := optionalArgument("iburst", &arguments)
@@ -74,7 +79,7 @@ func ParseConfig(path string) []*ServerAssociationConfig {
 				configParseError("minpoll must be less than maxpoll")
 			}
 
-			serverAssociation := &ServerAssociationConfig{
+			serverAssociation := ServerAssociationConfig{
 				address: address,
 				burst:   burst,
 				iburst:  iburst,

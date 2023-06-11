@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"net"
@@ -126,10 +128,8 @@ type NTPShortEncoded = uint32
 
 type Digest = uint32
 
-type IPAddr = uint32
-
 type NTPSystem struct {
-	address      net.IP
+	address      *net.UDPAddr
 	t            NTPTimestampEncoded /* update time */
 	leap         byte                /* leap indicator */
 	stratum      byte                /* stratum */
@@ -228,8 +228,8 @@ type EncodedReceivePacket struct {
 }
 
 type ReceivePacket struct {
-	srcaddr IPAddr              /* source (remote) address */
-	dstaddr IPAddr              /* destination (local) address */
+	srcaddr *net.UDPAddr        /* source (remote) address */
+	dstaddr *net.UDPAddr        /* destination (local) address */
 	leap    byte                /* leap indicator */
 	version byte                /* version number */
 	mode    Mode                /* mode */
@@ -240,8 +240,8 @@ type ReceivePacket struct {
 }
 
 type TransmitPacket struct {
-	dstaddr   IPAddr              /* source (local) address */
-	srcaddr   IPAddr              /* destination (remote) address */
+	dstaddr   *net.UDPAddr        /* source (local) address */
+	srcaddr   *net.UDPAddr        /* destination (remote) address */
 	leap      byte                /* leap indicator */
 	version   byte                /* version number */
 	mode      Mode                /* mode */
@@ -260,7 +260,7 @@ type TransmitPacket struct {
 	EncodedReceivePacket
 }
 
-func (system *NTPSystem) CreateAssociations(associationConfigs []*ServerAssociationConfig) []*Association {
+func (system *NTPSystem) CreateAssociations(associationConfigs []ServerAssociationConfig) []*Association {
 	associations := []*Association{}
 
 	for _, associationConfig := range associationConfigs {
@@ -268,8 +268,8 @@ func (system *NTPSystem) CreateAssociations(associationConfigs []*ServerAssociat
 			hmode: associationConfig.hmode,
 			hpoll: int8(associationConfig.minpoll),
 			ReceivePacket: ReceivePacket{
-				srcaddr: binary.BigEndian.Uint32(associationConfig.address),
-				dstaddr: binary.BigEndian.Uint32(system.address),
+				srcaddr: associationConfig.address,
+				dstaddr: system.address,
 				version: byte(associationConfig.version),
 				keyid:   int32(associationConfig.key),
 			},
@@ -332,6 +332,7 @@ func (system *NTPSystem) clockAdjust() {
 	 */
 	for _, association := range system.associations {
 		if system.clock.t >= uint64(association.nextdate) {
+			fmt.Println("Polling:", association.srcaddr.IP)
 			system.sendPoll(association)
 		}
 	}
@@ -397,6 +398,7 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		 * the next poll a packet will arrive and set the
 		 * rightmost bit.
 		 */
+		// TODO: Not sure what oreach is for
 		// oreach := association.reach
 		association.outdate = int32(system.clock.t)
 		association.reach = association.reach << 1
@@ -408,7 +410,6 @@ func (system *NTPSystem) sendPoll(association *Association) {
 
 		// Unreachable
 		if association.reach == 0 {
-
 			/*
 			 * The server is unreachable, so bump the
 			 * unreach counter.  If the unreach threshold
@@ -421,13 +422,11 @@ func (system *NTPSystem) sendPoll(association *Association) {
 				association.burst = BCOUNT
 			} else if association.unreach < UNREACH {
 				association.unreach++
-
 			} else {
 				hpoll++
 			}
 			association.unreach++
 		} else {
-
 			/*
 			 * The server is reachable.  Set the poll
 			 * interval to the system poll interval.  Send a
@@ -454,11 +453,13 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		system.pollPeer(association)
 	}
 	system.pollUpdate(association, hpoll)
-
 }
 
 func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (*ReceivePacket, error) {
 	clientAddrPort, err := netip.ParseAddrPort(clientAddr.String())
+	if err != nil {
+		return nil, err
+	}
 	localAddrPort, err := netip.ParseAddrPort(con.LocalAddr().String())
 	if err != nil {
 		return nil, err
@@ -485,8 +486,8 @@ func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	}
 
 	return &ReceivePacket{
-		srcaddr:              binary.BigEndian.Uint32(clientUDPAddr.IP),
-		dstaddr:              binary.BigEndian.Uint32(localUDPAddr.IP),
+		srcaddr:              clientUDPAddr,
+		dstaddr:              localUDPAddr,
 		leap:                 leap,
 		version:              version,
 		mode:                 Mode(mode),
@@ -714,8 +715,26 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		// x.dgst = md5(p->keyid);
 	}
 
-	net.Dial("udp", "")
-	// xmit_packet(&x)
+	conn, err := net.DialUDP("udp", association.dstaddr, association.srcaddr)
+	if err != nil {
+		panic("Error!")
+	}
+
+	var encoded bytes.Buffer
+	writer := bufio.NewWriter(&encoded)
+
+	var firstByte byte
+	firstByte = transmitPacket.leap << 6
+	firstByte |= transmitPacket.version << 3
+	firstByte |= byte(transmitPacket.mode)
+
+	writer.WriteByte(firstByte)
+
+	if err := binary.Write(writer, binary.BigEndian, &transmitPacket.EncodedReceivePacket); err != nil {
+		panic("encoded transmit packet err")
+	}
+
+	conn.Write(encoded.Bytes())
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -885,7 +904,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if uint32(association.refid) == association.dstaddr || association.refid == system.refid {
+	if uint32(association.refid) == binary.BigEndian.Uint32(association.dstaddr.IP) || association.refid == system.refid {
 		return false
 	}
 

@@ -3,11 +3,11 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -27,16 +27,25 @@ func main() {
 
 	associationConfigs := ParseConfig(config)
 
-	portStr := os.Getenv("NTP_PORT")
-	port, err := strconv.Atoi(portStr)
-	if portStr == "" || err != nil {
-		port = 1230
+	fmt.Println("Association configs:", associationConfigs)
+
+	port := os.Getenv("NTP_PORT")
+	if port == "" {
+		port = "1230"
 	}
 
-	host := net.ParseIP(os.Getenv("NTP_HOST"))
+	host := os.Getenv("NTP_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
+	address, err := net.ResolveUDPAddr("udp", host+":"+port)
+	if err != nil {
+		log.Fatal("Could not resolve NTP_HOST + NTP_PORT")
+	}
 
 	system := &NTPSystem{
-		address:   host,
+		address:   address,
 		leap:      NOSYNC,
 		stratum:   MAXSTRAT,
 		poll:      MINPOLL,
@@ -46,11 +55,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	addr := net.UDPAddr{
-		Port: port,
-		IP:   host,
-	}
-	udp, err := net.ListenUDP("udp", &addr)
+	udp, err := net.ListenUDP("udp", address)
 	if err != nil {
 		log.Fatalf("can't listen on %d/udp: %s", port, err)
 	}
@@ -85,8 +90,8 @@ func handleUDP(c *net.UDPConn, system *NTPSystem, wg *sync.WaitGroup) {
 		}
 		recvPacket.dst = GetSystemTime()
 		reply := system.Receive(*recvPacket)
-		if reply == nil {
-			log.Printf("Dropping packet:", reply.org)
+		if reply == nil && system.hmode != CLIENT {
+			log.Printf("Dropping packet: %d", reply.org)
 			return
 		}
 		encoded := EncodeTransmitPacket(*reply)
