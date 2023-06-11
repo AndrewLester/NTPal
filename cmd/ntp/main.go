@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -24,9 +25,14 @@ func main() {
 
 	associationConfigs := ParseConfig(config)
 
-	port := os.Getenv("NTP_PORT")
-	if port == "" {
-		port = "1230"
+	fmt.Println(associationConfigs)
+
+	return
+
+	portStr := os.Getenv("NTP_PORT")
+	port, err := strconv.Atoi(portStr)
+	if portStr == "" || err != nil {
+		port = 1230
 	}
 
 	host := os.Getenv("NTP_HOST")
@@ -40,7 +46,11 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	udp, err := net.ListenPacket("udp", fmt.Sprintf("%s:%s", host, port))
+	addr := net.UDPAddr{
+		Port: port,
+		IP:   net.ParseIP(host),
+	}
+	udp, err := net.ListenUDP("udp", &addr)
 	if err != nil {
 		log.Fatalf("can't listen on %s/udp: %s", port, err)
 	}
@@ -55,7 +65,7 @@ func main() {
 	wg.Wait()
 }
 
-func handleUDP(c net.PacketConn, system *NTPSystem, wg *sync.WaitGroup) {
+func handleUDP(c *net.UDPConn, system *NTPSystem, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	packet := make([]byte, MTU)

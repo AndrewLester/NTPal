@@ -12,18 +12,18 @@ import (
 	"time"
 )
 
-const PORT = 123         // NTP port number
-const VERSION byte = 4   // NTP version number
-const TOLERANCE = 15e-6  //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 4   //minimum poll exponent (16 s)
-const MAXPOLL int8 = 17  // maximum poll exponent (36 h)
-const MAXDISP byte = 16  // maximum dispersion (16 s)
-const MINDISP = 0.005    // minimum dispersion increment (s)
-const NOSYNC byte = 0x3  // leap unsync
-const MAXDIST byte = 1   // distance threshold (1 s)
-const MAXSTRAT byte = 16 // maximum stratum number
+const PORT = 123           // NTP port number
+const VERSION byte = 4     // NTP version number
+const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
+const MINPOLL int8 = 4     //minimum poll exponent (16 s)
+const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
+const MAXDISP float64 = 16 // maximum dispersion (16 s)
+const MINDISP = 0.005      // minimum dispersion increment (s)
+const NOSYNC byte = 0x3    // leap unsync
+const MAXDIST byte = 1     // distance threshold (1 s)
+const MAXSTRAT byte = 16   // maximum stratum number
 
-const NTPShortLength int64 = 65536        // 2^16
+const NTPShortLength float64 = 65536      // 2^16
 const eraLength int64 = 4_294_967_296     // 2^32
 const unixEraOffset int64 = 2_208_988_800 // 1970 - 1900 in seconds
 
@@ -50,6 +50,11 @@ const LIMIT = 30        /* poll-adjust threshold */
 const MAXFREQ = 500e-6  /* frequency tolerance (500 ppm) */
 const PGATE = 4         /* poll-adjust gate */
 
+const MINCLOCK = 3  /* minimum manycast survivors */
+const MAXCLOCK = 10 /* maximum manycast candidates */
+const TTLMAX = 8    /* max ttl manycast */
+const BEACON = 15   /* max interval between beacons */
+
 type Mode byte
 
 const (
@@ -59,8 +64,8 @@ const (
 	CLIENT
 	SERVER
 	BROADCAST_SERVER
-	NTP_CONTROL_MESSAGE
-	RESERVED_PRIVAT_EUSE
+	BROADCAST_CLIENT // Also NTP_CONTROL_MESSAGE?
+	RESERVED_PRIVATE_USE
 )
 
 type DispatchCode int
@@ -121,8 +126,8 @@ type NTPSystem struct {
 	rootdisp     float64             /* root dispersion */
 	refid        byte                /* reference ID */
 	reftime      NTPTimestampEncoded /* reference time */
-	m            [NMAX]M             /* chime list */
-	v            [NMAX]V             /* survivor list */
+	m            [NMAX]Chime         /* chime list */
+	v            [NMAX]Survivor      /* survivor list */
 	p            *Association        /* association ID */
 	offset       float64             /* combined offset */
 	jitter       float64             /* combined jitter */
@@ -158,6 +163,21 @@ type Association struct {
 	unreach  int
 	outdate  int32
 	nextdate int32
+
+	burstEnabled  bool
+	iburstEnabled bool
+	isMany        bool // manycast client association
+}
+
+type Chime struct { /* m is for Marzullo */
+	association *Association /* peer structure pointer */
+	levelType   int          /* high +1, mid 0, low -1 */
+	edge        float64      /* correctness interval edge */
+}
+
+type Survivor struct {
+	association *Association /* peer structure pointer */
+	metric      float64
 }
 
 // "t" is process time, not realtime. Only second incrementing
@@ -186,7 +206,7 @@ type EncodedReceivePacket struct {
 	precision int8                /* precision */
 	rootdelay NTPShortEncoded     /* root delay */
 	rootdisp  NTPShortEncoded     /* root dispersion */
-	refid     uint32              /* reference ID */
+	refid     byte                /* reference ID */
 	reftime   NTPTimestampEncoded /* reference time */
 	org       NTPTimestampEncoded /* origin timestamp */
 	rec       NTPTimestampEncoded /* receive timestamp */
@@ -194,7 +214,7 @@ type EncodedReceivePacket struct {
 }
 
 type ReceivePacket struct {
-	srcaddr netip.AddrPort      /* source (remote) address */
+	srcaddr IPAddr              /* source (remote) address */
 	dstaddr IPAddr              /* destination (local) address */
 	leap    byte                /* leap indicator */
 	version byte                /* version number */
@@ -265,7 +285,7 @@ func (system *NTPSystem) clockAdjust() {
 	 * This is the kernel adjust time function, usually implemented
 	 * by the Unix adjtime() system call.
 	 */
-	adjust_time(system.clock.freq + dtemp)
+	adjustTime(system.clock.freq + dtemp)
 
 	/*
 	 * Peer timer.  Call the poll() routine when the poll timer
@@ -298,9 +318,9 @@ func (system *NTPSystem) sendPoll(association *Association) {
 	 */
 	hpoll := association.hpoll
 	if association.hmode == BROADCAST_SERVER {
-		association.outdate = system.clock.t
+		association.outdate = int32(system.clock.t)
 		if system.p != nil {
-			peer_xmit(association)
+			system.pollPeer(association)
 		}
 		system.pollUpdate(association, hpoll)
 		return
@@ -313,21 +333,21 @@ func (system *NTPSystem) sendPoll(association *Association) {
 	 * the number of servers falls below MINCLOCK, then start all
 	 * over.
 	 */
-	if association.hmode == M_CLNT && association.flags&P_MANY {
-		association.outdate = system.clock.t
+	if association.hmode == CLIENT && association.isMany {
+		association.outdate = int32(system.clock.t)
 		if association.unreach > BEACON {
 			association.unreach = 0
 			association.ttl = 1
-			peer_xmit(assocation)
-		} else if s.n < MINCLOCK {
+			system.pollPeer(association)
+		} else if system.n < MINCLOCK {
 			if association.ttl < TTLMAX {
 				association.ttl++
 			}
-			peer_xmit(association)
+			system.pollPeer(association)
 		}
 
 		association.unreach++
-		poll_update(assocation, hpoll)
+		system.pollUpdate(association, hpoll)
 		return
 	}
 	if association.burst == 0 {
@@ -338,13 +358,17 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		 * the next poll a packet will arrive and set the
 		 * rightmost bit.
 		 */
-		oreach := association.reach
-		association.outdate = system.clock.t
-		association.reach = assocation.reach << 1
-		if !(association.reach & 0x7) {
-			clock_filter(assocation, 0, 0, MAXDISP)
+		// oreach := association.reach
+		association.outdate = int32(system.clock.t)
+		association.reach = association.reach << 1
+
+		// & with 0x7 to check if the last 3 attempts were unsuccessful
+		if association.reach&0x7 == 0 {
+			system.clockFilter(association, 0, 0, MAXDISP)
 		}
-		if !association.reach {
+
+		// Unreachable
+		if association.reach == 0 {
 
 			/*
 			 * The server is unreachable, so bump the
@@ -354,9 +378,9 @@ func (system *NTPSystem) sendPoll(association *Association) {
 			 * burst only if enabled and the unreach
 			 * threshold has not been reached.
 			 */
-			if association.flags&P_IBURST && association.unreach == 0 {
+			if association.iburstEnabled && association.unreach == 0 {
 				association.burst = BCOUNT
-			} else if assocation.unreach < UNREACH {
+			} else if association.unreach < UNREACH {
 				association.unreach++
 
 			} else {
@@ -371,8 +395,8 @@ func (system *NTPSystem) sendPoll(association *Association) {
 			 * burst only if enabled and the peer is fit.
 			 */
 			association.unreach = 0
-			hpoll = s.poll
-			if association.flags&P_BURST && fit(assocation) {
+			hpoll = system.poll
+			if association.burstEnabled && system.fit(association) {
 				association.burst = BCOUNT
 			}
 		}
@@ -387,10 +411,10 @@ func (system *NTPSystem) sendPoll(association *Association) {
 	/*
 	 * Do not transmit if in broadcast client mode.
 	 */
-	if association.hmode != M_BCLN {
-		peer_xmit(assocation)
+	if association.hmode != BROADCAST_CLIENT {
+		system.pollPeer(association)
 	}
-	poll_update(assocation, hpoll)
+	system.pollUpdate(association, hpoll)
 
 }
 
@@ -422,7 +446,7 @@ func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	}
 
 	return &ReceivePacket{
-		srcaddr:              clientAddrPort,
+		srcaddr:              binary.BigEndian.Uint32(clientUDPAddr.IP),
 		dstaddr:              binary.BigEndian.Uint32(localUDPAddr.IP),
 		leap:                 leap,
 		version:              version,
@@ -444,9 +468,16 @@ func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
 		return nil
 	}
 
-	association, contains := system.associations[packet.srcaddr]
-	hmode := byte(0)
-	if contains {
+	var association *Association
+	for _, possibleAssociation := range system.associations {
+		if association.srcaddr == possibleAssociation.srcaddr {
+			association = possibleAssociation
+			break
+		}
+	}
+
+	hmode := RESERVED
+	if association != nil {
 		hmode = association.hmode
 	}
 
@@ -503,8 +534,8 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	}
 	association.mode = packet.mode
 	association.poll = packet.poll
-	association.rootdelay = uint32(float64(packet.rootdelay) / float64(NTPShortLength))
-	association.rootdisp = uint32(float64(packet.rootdisp) / float64(NTPShortLength))
+	association.rootdelay = uint32(float64(packet.rootdelay) / NTPShortLength)
+	association.rootdisp = uint32(float64(packet.rootdisp) / NTPShortLength)
 	association.refid = packet.refid
 	association.reftime = packet.reftime
 
@@ -576,8 +607,8 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	}
 	transmitPacket.poll = receivePacket.poll
 	transmitPacket.precision = system.precision
-	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * float64(NTPShortLength))
-	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * float64(NTPShortLength))
+	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
+	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
 	transmitPacket.refid = system.refid
 	transmitPacket.reftime = system.reftime
 	transmitPacket.org = receivePacket.xmt
@@ -620,8 +651,8 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	}
 	transmitPacket.poll = association.hpoll
 	transmitPacket.precision = system.precision
-	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * float64(NTPShortLength))
-	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * float64(NTPShortLength))
+	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
+	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
 	transmitPacket.refid = system.refid
 	transmitPacket.reftime = system.reftime
 	transmitPacket.org = association.org
@@ -645,7 +676,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	}
 
 	net.Dial("udp", "")
-	xmit_packet(&x)
+	// xmit_packet(&x)
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -728,7 +759,8 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 
 	association.t = float64(f[0].t)
 	if association.burst == 0 {
-		clock_select()
+		// TODO clock_select
+		// clock_select()
 	}
 }
 
@@ -759,8 +791,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if association.refid == association.dstaddr || association.refid == s.refid {
-
+	if uint32(association.refid) == association.dstaddr || association.refid == system.refid {
 		return false
 	}
 
@@ -782,8 +813,8 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return (math.Max(MINDISP, assocation.rootdelay+association.delay)/2 +
-		association.rootdisp + association.disp + PHI*(system.clock.t-association.t) + association.jitter)
+	return (math.Max(MINDISP, float64(association.rootdelay)+association.delay)/2 +
+		float64(association.rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter)
 }
 
 func GetSystemTime() NTPTimestampEncoded {
@@ -792,17 +823,30 @@ func GetSystemTime() NTPTimestampEncoded {
 	return (UnixToNTPTimestampEncoded(unixTime))
 }
 
-func StepTime(offset float64) {
+func stepTime(offset float64) {
 	var unixTime syscall.Timeval
 	syscall.Gettimeofday(&unixTime)
 
 	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
 	unixTime.Sec = int64(ntpTime >> 32)
-	unixTime.Usec = int32(((ntpTime - unixTime.Sec) <<
+	unixTime.Usec = int32(int64((ntpTime-uint64(unixTime.Sec))<<
 		32) / eraLength * 1e6)
 
 	if os.Getenv("ENABLED") == "1" {
 		syscall.Settimeofday(&unixTime)
+	}
+}
+
+func adjustTime(offset float64) {
+	var unixTime syscall.Timeval
+
+	ntpTime := DoubleToNTPTimestampEncoded(offset)
+	unixTime.Sec = int64(ntpTime >> 32)
+	unixTime.Usec = int32(int64((ntpTime-uint64(unixTime.Sec))<<
+		32) / eraLength * 1e6)
+
+	if os.Getenv("ENABLED") == "1" {
+		syscall.Adjtime(&unixTime, nil)
 	}
 }
 
