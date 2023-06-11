@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
 var MTU = 1300
@@ -20,14 +21,11 @@ const DEFAULT_CONFIG_PATH = "/etc/ntp.conf"
 func main() {
 	var config string
 	flag.StringVar(&config, "config", DEFAULT_CONFIG_PATH, "Path to the NTP config file.")
-
 	flag.Parse()
 
+	rand.Seed(time.Now().UnixNano())
+
 	associationConfigs := ParseConfig(config)
-
-	fmt.Println(associationConfigs)
-
-	return
 
 	portStr := os.Getenv("NTP_PORT")
 	port, err := strconv.Atoi(portStr)
@@ -35,27 +33,27 @@ func main() {
 		port = 1230
 	}
 
-	host := os.Getenv("NTP_HOST")
+	host := net.ParseIP(os.Getenv("NTP_HOST"))
 
 	system := &NTPSystem{
+		address:   host,
 		leap:      NOSYNC,
 		stratum:   MAXSTRAT,
 		poll:      MINPOLL,
 		precision: PRECISION,
 	}
+	associations := system.CreateAssociations(associationConfigs)
 
 	var wg sync.WaitGroup
 
 	addr := net.UDPAddr{
 		Port: port,
-		IP:   net.ParseIP(host),
+		IP:   host,
 	}
 	udp, err := net.ListenUDP("udp", &addr)
 	if err != nil {
-		log.Fatalf("can't listen on %s/udp: %s", port, err)
+		log.Fatalf("can't listen on %d/udp: %s", port, err)
 	}
-
-	associations := []*Association{&Association{}}
 
 	system.SetupAsssociations(associations, &wg)
 

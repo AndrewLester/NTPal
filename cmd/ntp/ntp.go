@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -81,6 +82,17 @@ const (
 	NEWBC
 )
 
+type AssociationStateCode byte
+
+const (
+	INIT   AssociationStateCode = iota /* initialization */
+	STALE                              /* timeout */
+	STEP                               /* time step */
+	ERROR                              /* authentication error */
+	CRYPTO                             /* crypto-NAK received */
+	NKEY                               /* untrusted key */
+)
+
 // Index with [associationMode][packetMode]
 var dispatchTable = [][]DispatchCode{
 	{NEWPS, DSCRD, FXMIT, MANY, NEWBC},
@@ -117,6 +129,7 @@ type Digest = uint32
 type IPAddr = uint32
 
 type NTPSystem struct {
+	address      net.IP
 	t            NTPTimestampEncoded /* update time */
 	leap         byte                /* leap indicator */
 	stratum      byte                /* stratum */
@@ -167,6 +180,7 @@ type Association struct {
 	burstEnabled  bool
 	iburstEnabled bool
 	isMany        bool // manycast client association
+	ephemeral     bool
 }
 
 type Chime struct { /* m is for Marzullo */
@@ -244,6 +258,31 @@ type TransmitPacket struct {
 	keyid     int                 /* key ID */
 	dgst      Digest              /* message digest */
 	EncodedReceivePacket
+}
+
+func (system *NTPSystem) CreateAssociations(associationConfigs []*ServerAssociationConfig) []*Association {
+	associations := []*Association{}
+
+	for _, associationConfig := range associationConfigs {
+		association := &Association{
+			hmode: associationConfig.hmode,
+			hpoll: int8(associationConfig.minpoll),
+			ReceivePacket: ReceivePacket{
+				srcaddr: binary.BigEndian.Uint32(associationConfig.address),
+				dstaddr: binary.BigEndian.Uint32(system.address),
+				version: byte(associationConfig.version),
+				keyid:   int32(associationConfig.key),
+			},
+		}
+		system.clear(association, INIT)
+
+		association.burstEnabled = associationConfig.burst
+		association.iburstEnabled = associationConfig.iburst
+
+		associations = append(associations, association)
+	}
+
+	return associations
 }
 
 func (system *NTPSystem) SetupAsssociations(associations []*Association, wg *sync.WaitGroup) {
@@ -695,6 +734,61 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 	if uint64(association.nextdate) <= system.clock.t {
 		association.nextdate = int32(system.clock.t + 1)
 	}
+}
+
+func (system *NTPSystem) clear(association *Association, kiss AssociationStateCode) {
+	/*
+	 * The first thing to do is return all resources to the bank.
+	 * Typical resources are not detailed here, but they include
+	 * dynamically allocated structures for keys, certificates, etc.
+	 * If an ephemeral association and not initialization, return
+	 * the association memory as well.
+	 */
+	/* return resources */
+	if system.p == association {
+		system.p = nil
+	}
+
+	if kiss != INIT && association.ephemeral {
+		return
+	}
+
+	/*
+	 * Initialize the association fields for general reset.
+	 */
+	association.org = 0
+	association.rec = 0
+	association.xmt = 0
+	association.t = 0
+	association.f = [NSTAGE]FilterStage{}
+	association.offset = 0
+	association.delay = 0
+	association.disp = 0
+	association.jitter = 0
+	association.hpoll = 0
+	association.burst = 0
+	association.reach = 0
+	association.ttl = 0
+
+	association.leap = NOSYNC
+	association.stratum = MAXSTRAT
+	association.poll = MAXPOLL
+	association.hpoll = MINPOLL
+	association.disp = MAXDISP
+	association.jitter = Log2ToDouble(system.precision)
+	association.refid = byte(kiss)
+	for i := 0; i < NSTAGE; i++ {
+		association.f[i].disp = MAXDISP
+	}
+
+	/*
+	 * Randomize the first poll just in case thousands of broadcast
+	 * clients have just been stirred up after a long absence of the
+	 * broadcast server.
+	 */
+	association.t = float64(system.clock.t)
+	association.outdate = int32(association.t)
+	association.nextdate = association.outdate + rand.Int31n(1<<MINPOLL)
 }
 
 func (system *NTPSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {

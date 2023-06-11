@@ -3,13 +3,14 @@ package main
 import (
 	"bufio"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type ServerAssociationConfig struct {
-	address string
+	address net.IP
 	burst   bool
 	iburst  bool
 	prefer  bool
@@ -17,6 +18,7 @@ type ServerAssociationConfig struct {
 	version int
 	minpoll int
 	maxpoll int
+	hmode   Mode
 }
 
 const DEFAULT_MINPOLL = 6
@@ -42,7 +44,7 @@ func ParseConfig(path string) []*ServerAssociationConfig {
 				configParseError("Missing required argument \"address\"")
 			}
 
-			address := arguments[1]
+			address := net.ParseIP(arguments[1])
 
 			burst := optionalArgument("burst", &arguments)
 			iburst := optionalArgument("iburst", &arguments)
@@ -81,6 +83,7 @@ func ParseConfig(path string) []*ServerAssociationConfig {
 				version: version,
 				minpoll: minpoll,
 				maxpoll: maxpoll,
+				hmode:   CLIENT,
 			}
 			serverAssociations = append(serverAssociations, serverAssociation)
 
