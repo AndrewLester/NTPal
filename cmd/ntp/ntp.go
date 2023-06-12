@@ -221,7 +221,7 @@ type EncodedReceivePacket struct {
 	Precision int8                /* precision */
 	Rootdelay NTPShortEncoded     /* root delay */
 	Rootdisp  NTPShortEncoded     /* root dispersion */
-	Refid     byte                /* reference ID */
+	Refid     NTPShortEncoded     /* reference ID */
 	Reftime   NTPTimestampEncoded /* reference time */
 	Org       NTPTimestampEncoded /* origin timestamp */
 	Rec       NTPTimestampEncoded /* receive timestamp */
@@ -503,7 +503,7 @@ func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
 
 	var association *Association
 	for _, possibleAssociation := range system.associations {
-		if packet.srcaddr == possibleAssociation.srcaddr {
+		if packet.srcaddr.IP.Equal(possibleAssociation.srcaddr.IP) {
 			association = possibleAssociation
 			break
 		}
@@ -642,7 +642,7 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
 	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.Refid = system.refid
+	transmitPacket.Refid = uint32(system.refid)
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = receivePacket.Xmt
 	transmitPacket.Rec = receivePacket.dst
@@ -686,7 +686,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
 	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.Refid = system.refid
+	transmitPacket.Refid = uint32(system.refid)
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = association.Org
 	transmitPacket.Rec = association.Rec
@@ -727,7 +727,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	if err != nil {
 		fmt.Println("Error", err)
 	}
-	fmt.Println("written", written)
+	fmt.Println("written", written, len(encoded.Bytes()), encoded.Bytes())
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -788,7 +788,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.hpoll = MINPOLL
 	association.disp = MAXDISP
 	association.jitter = Log2ToDouble(system.precision)
-	association.Refid = byte(kiss)
+	association.Refid = uint32(kiss)
 	for i := 0; i < NSTAGE; i++ {
 		association.f[i].disp = MAXDISP
 	}
@@ -897,7 +897,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if uint32(association.Refid) == binary.BigEndian.Uint32(association.dstaddr.IP) || association.Refid == system.refid {
+	if association.Refid == binary.BigEndian.Uint32(association.dstaddr.IP) || association.Refid == uint32(system.refid) {
 		return false
 	}
 
@@ -953,6 +953,8 @@ func adjustTime(offset float64) {
 
 	if os.Getenv("ENABLED") == "1" {
 		syscall.Adjtime(&unixTime, nil)
+	} else {
+		fmt.Println("ADJTIME:", time.Unix(unixTime.Sec, int64(unixTime.Usec)*1000))
 	}
 }
 

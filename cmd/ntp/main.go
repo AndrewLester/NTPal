@@ -33,11 +33,7 @@ func main() {
 	if port == "" {
 		port = "123"
 	}
-
 	host := os.Getenv("NTP_HOST")
-	if host == "" {
-		host = "0.0.0.0"
-	}
 
 	address, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, port))
 	if err != nil {
@@ -52,7 +48,7 @@ func main() {
 	system := &NTPSystem{
 		address:   address,
 		leap:      NOSYNC,
-		stratum:   3,
+		stratum:   MAXSTRAT,
 		poll:      MINPOLL,
 		precision: PRECISION,
 		conn:      udp,
@@ -93,7 +89,6 @@ func handleUDP(c *net.UDPConn, system *NTPSystem, wg *sync.WaitGroup) {
 		recvPacket.dst = GetSystemTime()
 		reply := system.Receive(*recvPacket)
 		if reply == nil {
-			log.Printf("Dropping packet: %d", reply.Org)
 			return
 		}
 		encoded := EncodeTransmitPacket(*reply)
