@@ -148,6 +148,7 @@ type NTPSystem struct {
 	n            int                 /* number of survivors */
 	associations []*Association
 	clock        Clock
+	conn         *net.UDPConn
 }
 
 type Association struct {
@@ -215,16 +216,16 @@ type FilterStage struct {
 
 // Fields that can be read directly from the packet bytes
 type EncodedReceivePacket struct {
-	stratum   byte                /* stratum */
-	poll      int8                /* poll interval */
-	precision int8                /* precision */
-	rootdelay NTPShortEncoded     /* root delay */
-	rootdisp  NTPShortEncoded     /* root dispersion */
-	refid     byte                /* reference ID */
-	reftime   NTPTimestampEncoded /* reference time */
-	org       NTPTimestampEncoded /* origin timestamp */
-	rec       NTPTimestampEncoded /* receive timestamp */
-	xmt       NTPTimestampEncoded /* transmit timestamp */
+	Stratum   byte                /* stratum */
+	Poll      int8                /* poll interval */
+	Precision int8                /* precision */
+	Rootdelay NTPShortEncoded     /* root delay */
+	Rootdisp  NTPShortEncoded     /* root dispersion */
+	Refid     byte                /* reference ID */
+	Reftime   NTPTimestampEncoded /* reference time */
+	Org       NTPTimestampEncoded /* origin timestamp */
+	Rec       NTPTimestampEncoded /* receive timestamp */
+	Xmt       NTPTimestampEncoded /* transmit timestamp */
 }
 
 type ReceivePacket struct {
@@ -240,23 +241,13 @@ type ReceivePacket struct {
 }
 
 type TransmitPacket struct {
-	dstaddr   *net.UDPAddr        /* source (local) address */
-	srcaddr   *net.UDPAddr        /* destination (remote) address */
-	leap      byte                /* leap indicator */
-	version   byte                /* version number */
-	mode      Mode                /* mode */
-	stratum   byte                /* stratum */
-	poll      int8                /* poll interval */
-	precision int8                /* precision */
-	rootdelay NTPShortEncoded     /* root delay */
-	rootdisp  NTPShortEncoded     /* root dispersion */
-	refid     byte                /* reference ID */
-	reftime   NTPTimestampEncoded /* reference time */
-	org       NTPTimestampEncoded /* origin timestamp */
-	rec       NTPTimestampEncoded /* receive timestamp */
-	xmt       NTPTimestampEncoded /* transmit timestamp */
-	keyid     int                 /* key ID */
-	dgst      Digest              /* message digest */
+	dstaddr *net.UDPAddr /* source (local) address */
+	srcaddr *net.UDPAddr /* destination (remote) address */
+	leap    byte         /* leap indicator */
+	version byte         /* version number */
+	mode    Mode         /* mode */
+	keyid   int          /* key ID */
+	dgst    Digest       /* message digest */
 	EncodedReceivePacket
 }
 
@@ -504,13 +495,15 @@ func EncodeTransmitPacket(packet TransmitPacket) []byte {
 }
 
 func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
+	fmt.Println("Received packet from:", packet.srcaddr.IP)
+
 	if packet.version > VERSION {
 		return nil
 	}
 
 	var association *Association
 	for _, possibleAssociation := range system.associations {
-		if association.srcaddr == possibleAssociation.srcaddr {
+		if packet.srcaddr == possibleAssociation.srcaddr {
 			association = possibleAssociation
 			break
 		}
@@ -540,18 +533,18 @@ func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
 		return nil
 	}
 
-	if packet.xmt == 0 {
+	if packet.Xmt == 0 {
 		return nil
 	}
 
-	if packet.xmt == association.xmt {
+	if packet.Xmt == association.Xmt {
 		return nil
 	}
 
-	unsynch := packet.mode != BROADCAST_SERVER && (packet.org == 0 || packet.org != association.xmt)
+	unsynch := packet.mode != BROADCAST_SERVER && (packet.Org == 0 || packet.Org != association.Xmt)
 
-	association.org = packet.xmt
-	association.rec = packet.dst
+	association.Org = packet.Xmt
+	association.Rec = packet.dst
 
 	if unsynch {
 		return nil
@@ -567,31 +560,31 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	var disp float64   /* sample dispersion */
 
 	association.leap = packet.leap
-	if packet.stratum == 0 {
-		association.stratum = MAXSTRAT
+	if packet.Stratum == 0 {
+		association.Stratum = MAXSTRAT
 	} else {
-		association.stratum = packet.stratum
+		association.Stratum = packet.Stratum
 	}
 	association.mode = packet.mode
-	association.poll = packet.poll
-	association.rootdelay = uint32(float64(packet.rootdelay) / NTPShortLength)
-	association.rootdisp = uint32(float64(packet.rootdisp) / NTPShortLength)
-	association.refid = packet.refid
-	association.reftime = packet.reftime
+	association.Poll = packet.Poll
+	association.Rootdelay = uint32(float64(packet.Rootdelay) / NTPShortLength)
+	association.Rootdisp = uint32(float64(packet.Rootdisp) / NTPShortLength)
+	association.Refid = packet.Refid
+	association.Reftime = packet.Reftime
 
 	/*
 	 * Verify the server is synchronized with valid stratum and
 	 * reference time not later than the transmit time.
 	 */
-	if association.leap == NOSYNC || association.stratum >= MAXSTRAT {
+	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
 		return /* unsynchronized */
 	}
 
 	/*
 	 * Verify valid root distance.
 	 */
-	if association.rootdelay/2+association.rootdisp >= uint32(MAXDISP) || association.reftime >
-		packet.xmt {
+	if association.Rootdelay/2+association.Rootdisp >= uint32(MAXDISP) || association.Reftime >
+		packet.Xmt {
 
 		return /* invalid header values */
 	}
@@ -615,17 +608,17 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	 * the delay is clamped not less than the system precision.
 	 */
 	if association.mode == BROADCAST_SERVER {
-		offset = NTPTimestampEncodedToDouble(packet.xmt - packet.dst)
+		offset = NTPTimestampEncodedToDouble(packet.Xmt - packet.dst)
 		delay = BDELAY
-		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
+		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			2*BDELAY
 	} else {
-		offset = (NTPTimestampEncodedToDouble(packet.rec-packet.org) + NTPTimestampEncodedToDouble(packet.xmt-
+		offset = (NTPTimestampEncodedToDouble(packet.Rec-packet.Org) + NTPTimestampEncodedToDouble(packet.Xmt-
 			packet.dst)) / 2
-		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.org)-NTPTimestampEncodedToDouble(packet.xmt-
-			packet.rec), Log2ToDouble(system.precision))
-		disp = Log2ToDouble(packet.precision) + Log2ToDouble(system.precision) + PHI*
-			NTPTimestampEncodedToDouble(packet.dst-packet.org)
+		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.Org)-NTPTimestampEncodedToDouble(packet.Xmt-
+			packet.Rec), Log2ToDouble(system.precision))
+		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
+			NTPTimestampEncodedToDouble(packet.dst-packet.Org)
 	}
 
 	system.clockFilter(association, offset, delay, disp)
@@ -641,19 +634,19 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	transmitPacket.leap = system.leap
 	transmitPacket.mode = mode
 	if system.stratum == MAXSTRAT {
-		transmitPacket.stratum = 0
+		transmitPacket.Stratum = 0
 	} else {
-		transmitPacket.stratum = system.stratum
+		transmitPacket.Stratum = system.stratum
 	}
-	transmitPacket.poll = receivePacket.poll
-	transmitPacket.precision = system.precision
-	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
-	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.refid = system.refid
-	transmitPacket.reftime = system.reftime
-	transmitPacket.org = receivePacket.xmt
-	transmitPacket.rec = receivePacket.dst
-	transmitPacket.xmt = GetSystemTime()
+	transmitPacket.Poll = receivePacket.Poll
+	transmitPacket.Precision = system.precision
+	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
+	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
+	transmitPacket.Refid = system.refid
+	transmitPacket.Reftime = system.reftime
+	transmitPacket.Org = receivePacket.Xmt
+	transmitPacket.Rec = receivePacket.dst
+	transmitPacket.Xmt = GetSystemTime()
 
 	/*
 	 * If the authentication code is A.NONE, include only the
@@ -685,20 +678,20 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	transmitPacket.version = association.version
 	transmitPacket.mode = association.hmode
 	if system.stratum == MAXSTRAT {
-		transmitPacket.stratum = 0
+		transmitPacket.Stratum = 0
 	} else {
-		transmitPacket.stratum = system.stratum
+		transmitPacket.Stratum = system.stratum
 	}
-	transmitPacket.poll = association.hpoll
-	transmitPacket.precision = system.precision
-	transmitPacket.rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
-	transmitPacket.rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.refid = system.refid
-	transmitPacket.reftime = system.reftime
-	transmitPacket.org = association.org
-	transmitPacket.rec = association.rec
-	transmitPacket.xmt = GetSystemTime()
-	association.xmt = transmitPacket.xmt
+	transmitPacket.Poll = association.hpoll
+	transmitPacket.Precision = system.precision
+	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
+	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
+	transmitPacket.Refid = system.refid
+	transmitPacket.Reftime = system.reftime
+	transmitPacket.Org = association.Org
+	transmitPacket.Rec = association.Rec
+	transmitPacket.Xmt = GetSystemTime()
+	association.Xmt = transmitPacket.Xmt
 
 	/*
 	 * If the key ID is nonzero, send a valid MAC using the key ID
@@ -715,11 +708,6 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		// x.dgst = md5(p->keyid);
 	}
 
-	conn, err := net.DialUDP("udp", association.dstaddr, association.srcaddr)
-	if err != nil {
-		panic("Error!")
-	}
-
 	var encoded bytes.Buffer
 	writer := bufio.NewWriter(&encoded)
 
@@ -729,12 +717,17 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	firstByte |= byte(transmitPacket.mode)
 
 	writer.WriteByte(firstByte)
-
-	if err := binary.Write(writer, binary.BigEndian, &transmitPacket.EncodedReceivePacket); err != nil {
+	if err := binary.Write(writer, binary.BigEndian, transmitPacket.EncodedReceivePacket); err != nil {
 		panic("encoded transmit packet err")
 	}
 
-	conn.Write(encoded.Bytes())
+	writer.Flush()
+
+	written, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
+	if err != nil {
+		fmt.Println("Error", err)
+	}
+	fmt.Println("written", written)
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -746,7 +739,7 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 			association.nextdate += BTIME
 		}
 	} else {
-		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.poll),
+		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))))
 	}
 
@@ -775,9 +768,9 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	/*
 	 * Initialize the association fields for general reset.
 	 */
-	association.org = 0
-	association.rec = 0
-	association.xmt = 0
+	association.Org = 0
+	association.Rec = 0
+	association.Xmt = 0
 	association.t = 0
 	association.f = [NSTAGE]FilterStage{}
 	association.offset = 0
@@ -790,12 +783,12 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.ttl = 0
 
 	association.leap = NOSYNC
-	association.stratum = MAXSTRAT
-	association.poll = MAXPOLL
+	association.Stratum = MAXSTRAT
+	association.Poll = MAXPOLL
 	association.hpoll = MINPOLL
 	association.disp = MAXDISP
 	association.jitter = Log2ToDouble(system.precision)
-	association.refid = byte(kiss)
+	association.Refid = byte(kiss)
 	for i := 0; i < NSTAGE; i++ {
 		association.f[i].disp = MAXDISP
 	}
@@ -885,7 +878,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * A stratum error occurs if (1) the server has never been
 	 * synchronized, (2) the server stratum is invalid.
 	 */
-	if association.leap == NOSYNC || association.stratum >= MAXSTRAT {
+	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
 		return false
 	}
 
@@ -904,7 +897,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if uint32(association.refid) == binary.BigEndian.Uint32(association.dstaddr.IP) || association.refid == system.refid {
+	if uint32(association.Refid) == binary.BigEndian.Uint32(association.dstaddr.IP) || association.Refid == system.refid {
 		return false
 	}
 
@@ -926,8 +919,8 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return (math.Max(MINDISP, float64(association.rootdelay)+association.delay)/2 +
-		float64(association.rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter)
+	return (math.Max(MINDISP, float64(association.Rootdelay)+association.delay)/2 +
+		float64(association.Rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter)
 }
 
 func GetSystemTime() NTPTimestampEncoded {
