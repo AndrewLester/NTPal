@@ -283,12 +283,13 @@ func (system *NTPSystem) SetupAsssociations(associations []*Association, wg *syn
 	go func() {
 		for {
 			system.clockAdjust()
-			time.Sleep(time.Duration(1) * time.Second)
+			time.Sleep(time.Second)
 		}
 	}()
 }
 
 func (system *NTPSystem) clockAdjust() {
+	fmt.Println("Clock adjust at:", time.Now())
 
 	/*
 	 * Update the process time c.t.  Also increase the dispersion
@@ -514,7 +515,7 @@ func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
 		hmode = association.hmode
 	}
 
-	switch dispatchTable[hmode][packet.mode] {
+	switch dispatchTable[hmode][packet.mode-1] {
 	case FXMIT:
 		// If the destination address is not a broadcast
 		//    address
@@ -708,26 +709,28 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		// x.dgst = md5(p->keyid);
 	}
 
-	var encoded bytes.Buffer
-	writer := bufio.NewWriter(&encoded)
+	go func() {
+		var encoded bytes.Buffer
+		writer := bufio.NewWriter(&encoded)
 
-	var firstByte byte
-	firstByte = transmitPacket.leap << 6
-	firstByte |= transmitPacket.version << 3
-	firstByte |= byte(transmitPacket.mode)
+		var firstByte byte
+		firstByte = transmitPacket.leap << 6
+		firstByte |= transmitPacket.version << 3
+		firstByte |= byte(transmitPacket.mode)
 
-	writer.WriteByte(firstByte)
-	if err := binary.Write(writer, binary.BigEndian, transmitPacket.EncodedReceivePacket); err != nil {
-		panic("encoded transmit packet err")
-	}
+		writer.WriteByte(firstByte)
+		if err := binary.Write(writer, binary.BigEndian, transmitPacket.EncodedReceivePacket); err != nil {
+			panic("encoded transmit packet err")
+		}
 
-	writer.Flush()
+		writer.Flush()
 
-	written, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
-	if err != nil {
-		fmt.Println("Error", err)
-	}
-	fmt.Println("written", written, len(encoded.Bytes()), encoded.Bytes())
+		written, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
+		if err != nil {
+			fmt.Println("Error", err)
+		}
+		fmt.Println("written", written, len(encoded.Bytes()), encoded.Bytes())
+	}()
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -954,7 +957,9 @@ func adjustTime(offset float64) {
 	if os.Getenv("ENABLED") == "1" {
 		syscall.Adjtime(&unixTime, nil)
 	} else {
-		fmt.Println("ADJTIME:", time.Unix(unixTime.Sec, int64(unixTime.Usec)*1000))
+		var now syscall.Timeval
+		syscall.Gettimeofday(&now)
+		fmt.Println("ADJTIME:", time.Unix(now.Sec, int64(now.Usec)*1000).Add(time.Duration(unixTime.Sec)*time.Second).Add(time.Duration(unixTime.Usec)*time.Microsecond))
 	}
 }
 
@@ -991,4 +996,9 @@ func NTPDateToTime(ntpDate NTPDate) time.Time {
 	// TODO: Need to handle fraction
 	time := time.Unix(s, 0)
 	return time
+}
+
+func NTPTimestampToTime(ntpTimestamp NTPTimestampEncoded) time.Time {
+	now := NTPTimestampEncodedToDouble(ntpTimestamp)
+	return time.Unix(int64(now)-unixEraOffset, int64(now*1e6)%1e6)
 }
