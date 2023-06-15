@@ -17,10 +17,13 @@ var MTU = 1300
 var PRECISION int8 = -18 /* precision (log2 s)  */
 
 const DEFAULT_CONFIG_PATH = "/etc/ntp.conf"
+const DEFAULT_DRIFT_PATH = "/etc/ntp.drift"
 
 func main() {
 	var config string
+	var drift string
 	flag.StringVar(&config, "config", DEFAULT_CONFIG_PATH, "Path to the NTP config file.")
+	flag.StringVar(&drift, "drift", DEFAULT_DRIFT_PATH, "Path to the NTP drift file.")
 	flag.Parse()
 
 	rand.Seed(time.Now().UnixNano())
@@ -52,6 +55,7 @@ func main() {
 		poll:      MINPOLL,
 		precision: PRECISION,
 		conn:      udp,
+		drift:     drift,
 	}
 	associations := system.CreateAssociations(associationConfigs)
 
