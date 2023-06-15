@@ -592,6 +592,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	var disp float64   /* sample dispersion */
 
 	association.leap = packet.leap
+	fmt.Println("RECEIVED WITH STRATUM:", packet.Stratum)
 	if packet.Stratum == 0 {
 		association.Stratum = MAXSTRAT
 	} else {
@@ -762,7 +763,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		if err != nil {
 			fmt.Println("Error", err)
 		}
-		fmt.Println("written", written, len(encoded.Bytes()), encoded.Bytes())
+		fmt.Println("written", written, "to:", transmitPacket.dstaddr.String())
 	}()
 }
 
@@ -907,11 +908,6 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 
 func (system *NTPSystem) clockSelect() {
 	fmt.Println("selection")
-
-	var low, high float64
-	var allow, found, chime int
-	var n int
-
 	/*
 	 * We first cull the falsetickers from the server population,
 	 * leaving only the truechimers.  The correctness interval for
@@ -927,7 +923,7 @@ func (system *NTPSystem) clockSelect() {
 	osys := system.p
 	system.p = nil
 
-	n = 0
+	n := 0
 	for _, association := range system.associations {
 		if !system.fit(association) {
 			continue
@@ -956,19 +952,21 @@ func (system *NTPSystem) clockSelect() {
 	 * are limited to the range +-(2 ^ 30) < +-2e9 by the timestamp
 	 * calculations.
 	 */
-	low = 2e9
-	high = -2e9
-	for allow = 0; 2*allow < n; allow++ {
-
+	m := len(system.associations)
+	fmt.Println("M,N:", m, n)
+	low := 2e9
+	high := -2e9
+	for allow := 0; 2*allow < m; allow++ {
 		/*
 		 * Scan the chime list from lowest to highest to find
 		 * the lower endpoint.
 		 */
-		found = 0
-		chime = 0
+		found := 0
+		chime := 0
 		for i := 0; i < n; i++ {
 			chime -= system.m[i].levelType
-			if chime >= n-allow {
+			fmt.Println("chime:", chime, "m-allow:", m-allow)
+			if chime >= m-allow {
 				low = system.m[i].edge
 				break
 			}
@@ -984,7 +982,7 @@ func (system *NTPSystem) clockSelect() {
 		chime = 0
 		for i := n - 1; i >= 0; i-- {
 			chime += system.m[i].levelType
-			if chime >= n-allow {
+			if chime >= m-allow {
 				high = system.m[i].edge
 				break
 			}
@@ -1009,6 +1007,11 @@ func (system *NTPSystem) clockSelect() {
 		if high > low {
 			break
 		}
+	}
+
+	if high < low {
+		fmt.Println("Interval not found")
+		return
 	}
 
 	/*
@@ -1237,6 +1240,8 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * distance threshold plus an increment equal to one poll
 	 * interval.
 	 */
+	fmt.Println(system.rootDist(association), float64(MAXDIST)+PHI*Log2ToDouble(system.poll), system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll))
+
 	if system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll) {
 		return false
 	}
@@ -1507,8 +1512,9 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return (math.Max(MINDISP, float64(association.Rootdelay)+association.delay)/2 +
-		float64(association.Rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter)
+	fmt.Println("rootdelay + delay:", float64(association.Rootdelay)+association.delay, "root disp+disp:", float64(association.Rootdisp)+association.disp, "phi*clockdiff:", PHI*float64(float64(system.clock.t)-association.t), "jitter:", association.jitter, "root disp:", float64(association.Rootdisp), "disp:", association.disp)
+	return math.Max(MINDISP, float64(association.Rootdelay)+association.delay)/2 +
+		float64(association.Rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter
 }
 
 func GetSystemTime() NTPTimestampEncoded {
