@@ -7,3 +7,7 @@ To get started:
 1. clone this repo
 2. `flyctl launch`
 3. view the deployed app with flyctl open
+
+## Development
+
+1. `flyctl deploy`

@@ -145,7 +145,7 @@ func RemoveIndex[T any](s *[]T, index int) {
 	ret := make([]T, 0)
 	ret = append(ret, (*s)[:index]...)
 	ret = append(ret, (*s)[index+1:]...)
-	s = &ret
+	*s = ret
 }
 
 func configParseError(args ...any) {

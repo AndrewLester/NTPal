@@ -148,23 +148,24 @@ type NTPShortEncoded = uint32
 type Digest = uint32
 
 type NTPSystem struct {
-	address      *net.UDPAddr
-	t            NTPTimestampEncoded /* update time */
-	leap         byte                /* leap indicator */
-	stratum      byte                /* stratum */
-	poll         int8                /* poll interval */
-	precision    int8                /* precision */
-	rootdelay    float64             /* root delay */
-	rootdisp     float64             /* root dispersion */
-	refid        byte                /* reference ID */
-	reftime      NTPTimestampEncoded /* reference time */
-	m            [NMAX]Chime         /* chime list */
-	v            [NMAX]Survivor      /* survivor list */
-	p            *Association        /* association ID */
-	offset       float64             /* combined offset */
-	jitter       float64             /* combined jitter */
-	flags        int                 /* option flags */
-	n            int                 /* number of survivors */
+	address   *net.UDPAddr
+	t         NTPTimestampEncoded /* update time */
+	leap      byte                /* leap indicator */
+	stratum   byte                /* stratum */
+	poll      int8                /* poll interval */
+	precision int8                /* precision */
+	rootdelay float64             /* root delay */
+	rootdisp  float64             /* root dispersion */
+	refid     byte                /* reference ID */
+	reftime   NTPTimestampEncoded /* reference time */
+	// Max of the two below is NMAX, but using slice type becaues it's not always full, and nils cant be sorted
+	m            []Chime      /* chime list */
+	v            []Survivor   /* survivor list */
+	p            *Association /* association ID */
+	offset       float64      /* combined offset */
+	jitter       float64      /* combined jitter */
+	flags        int          /* option flags */
+	n            int          /* number of survivors */
 	associations []*Association
 	clock        Clock
 	conn         *net.UDPConn
@@ -210,7 +211,7 @@ type Chime struct { /* m is for Marzullo */
 	edge        float64      /* correctness interval edge */
 }
 
-type Chimers [NMAX]Chime
+type Chimers []Chime
 
 func (s Chimers) Len() int      { return len(s) }
 func (s Chimers) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
@@ -245,6 +246,19 @@ type FilterStage struct {
 	offset float64             /* clock ofset */
 	delay  float64             /* roundtrip delay */
 	disp   float64             /* dispersion */
+}
+
+type FilterStages [NSTAGE]FilterStage
+
+func (s FilterStages) Len() int      { return len(s) }
+func (s FilterStages) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+type ByDelay struct {
+	FilterStages
+}
+
+func (s ByDelay) Less(i, j int) bool {
+	return s.FilterStages[i].delay < s.FilterStages[j].delay
 }
 
 // Fields that can be read directly from the packet bytes
@@ -426,9 +440,9 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		association.outdate = int32(system.clock.t)
 		association.reach = association.reach << 1
 
-		// & with 0x7 to check if the last 3 attempts were unsuccessful
-		if association.reach&0x7 == 0 {
-			system.clockFilter(association, 0, 0, MAXDISP)
+		// & with 0b111 to check if the last 3 attempts were unsuccessful
+		if association.reach&0b111 == 0 {
+			system.clockFilter(association, 0, MAXDISP, MAXDISP)
 		}
 
 		// Unreachable
@@ -828,6 +842,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.Refid = uint32(kiss)
 	for i := 0; i < NSTAGE; i++ {
 		association.f[i].disp = MAXDISP
+		association.f[i].delay = MAXDISP
 	}
 
 	/*
@@ -854,7 +869,8 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	 * place the (offset, delay, disp, time) in the vacated
 	 * rightmost tuple.
 	 */
-	for i := 1; i < NSTAGE; i++ {
+	association.disp = 0
+	for i := NSTAGE - 1; i > 0; i-- {
 		association.f[i] = association.f[i-1]
 		association.f[i].disp += PHI * (float64(system.clock.t) - association.t)
 		f[i] = association.f[i]
@@ -870,12 +886,29 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	 * The first entry on the sorted list represents the best
 	 * sample, but it might be old.
 	 */
+
+	sort.Sort(ByDelay{f})
+
+	lastValid := 0
+	for i := 0; i < NSTAGE; i++ {
+		if f[i].t == 0 {
+			break
+		}
+		lastValid = i
+	}
+
 	dtemp := association.offset
 	association.offset = f[0].offset
 	association.delay = f[0].delay
 	for i := 0; i < NSTAGE; i++ {
 		association.disp += f[i].disp / (math.Pow(2, float64(i+1)))
-		association.jitter += math.Pow((f[i].offset - f[0].offset), 2)
+		if i > 0 && i <= lastValid {
+			association.jitter += math.Pow((f[0].offset - f[i].offset), 2)
+		}
+	}
+	if lastValid+1 > 1 {
+		association.jitter = math.Sqrt(association.jitter)
+		association.jitter /= float64(lastValid)
 	}
 	association.jitter = math.Max(math.Sqrt(association.jitter), Log2ToDouble(system.precision))
 
@@ -929,18 +962,23 @@ func (system *NTPSystem) clockSelect() {
 			continue
 		}
 
-		system.m[n].association = association
-		system.m[n].levelType = 1
-		system.m[n].edge = association.offset + system.rootDist(association)
-		n++
-		system.m[n].association = association
-		system.m[n].levelType = 0
-		system.m[n].edge = association.offset
-		n++
-		system.m[n].association = association
-		system.m[n].levelType = -1
-		system.m[n].edge = association.offset - system.rootDist(association)
-		n++
+		system.m = append(system.m, Chime{
+			association: association,
+			levelType:   1,
+			edge:        association.offset + system.rootDist(association),
+		})
+		system.m = append(system.m, Chime{
+			association: association,
+			levelType:   0,
+			edge:        association.offset,
+		})
+		system.m = append(system.m, Chime{
+			association: association,
+			levelType:   -1,
+			edge:        association.offset - system.rootDist(association),
+		})
+
+		n += 3
 	}
 
 	sort.Sort(ByEdge{system.m})
@@ -953,7 +991,6 @@ func (system *NTPSystem) clockSelect() {
 	 * calculations.
 	 */
 	m := len(system.associations)
-	fmt.Println("M,N:", m, n)
 	low := 2e9
 	high := -2e9
 	for allow := 0; 2*allow < m; allow++ {
@@ -965,7 +1002,7 @@ func (system *NTPSystem) clockSelect() {
 		chime := 0
 		for i := 0; i < n; i++ {
 			chime -= system.m[i].levelType
-			fmt.Println("chime:", chime, "m-allow:", m-allow)
+			fmt.Println("edge:", system.m[i].edge, "level:", system.m[i].levelType, "chime:", chime, "m-allow:", m-allow)
 			if chime >= m-allow {
 				low = system.m[i].edge
 				break
@@ -1027,8 +1064,10 @@ func (system *NTPSystem) clockSelect() {
 		}
 
 		association := system.m[i].association
-		system.v[n].association = association
-		system.v[n].metric = float64(MAXDIST*association.Stratum) + system.rootDist(association)
+		system.v = append(system.v, Survivor{
+			association: association,
+			metric:      float64(MAXDIST*association.Stratum) + system.rootDist(association),
+		})
 		system.n++
 	}
 
@@ -1108,7 +1147,8 @@ func (system *NTPSystem) clockSelect() {
 	 * then don't do a clock hop.  Otherwise, select the first
 	 * survivor on the list as the new system peer.
 	 */
-	if osys.Stratum == system.v[0].association.Stratum {
+	fmt.Println("osys:", osys, "system.v[0]:", system.v[0])
+	if osys != nil && osys.Stratum == system.v[0].association.Stratum {
 		system.p = osys
 	} else {
 		system.p = system.v[0].association
@@ -1118,7 +1158,7 @@ func (system *NTPSystem) clockSelect() {
 }
 
 func (system *NTPSystem) clockUpdate(association *Association) {
-	fmt.Println("Clock update")
+	fmt.Println("Clock update, offset:", time.Now().Add(time.Duration(system.offset)*time.Second))
 
 	var dtemp float64
 
@@ -1138,6 +1178,8 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 	//  TODO: Fix type error after removing cast hereV
 	system.t = uint64(association.t)
 	system.clockCombine()
+	fmt.Println("After combine, offset:", time.Now().Add(time.Duration(system.offset)*time.Second))
+
 	switch system.localClock(association, system.offset) {
 	/*
 	 * The offset is too large and probably bogus.  Complain to the
@@ -1212,7 +1254,7 @@ func (system *NTPSystem) clockCombine() {
 	w = 0
 	z = w
 	y = z
-	for i := 0; system.v[i].association != nil; i++ {
+	for i := 0; i < len(system.v) && system.v[i].association != nil; i++ {
 		association = system.v[i].association
 		x = system.rootDist(association)
 		y += 1 / x
@@ -1240,8 +1282,6 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * distance threshold plus an increment equal to one poll
 	 * interval.
 	 */
-	fmt.Println(system.rootDist(association), float64(MAXDIST)+PHI*Log2ToDouble(system.poll), system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll))
-
 	if system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll) {
 		return false
 	}
@@ -1367,7 +1407,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			rval = LSTEP
 			if state == NSET {
 				system.rstclock(FREQ, association.t, 0)
-				return (rval)
+				return rval
 			}
 		}
 		system.rstclock(SYNC, association.t, 0)
@@ -1528,9 +1568,8 @@ func stepTime(offset float64) {
 	syscall.Gettimeofday(&unixTime)
 
 	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
-	unixTime.Sec = int64(ntpTime >> 32)
-	unixTime.Usec = int32(int64((ntpTime-uint64(unixTime.Sec))<<
-		32) / eraLength * 1e6)
+	fmt.Println("NTpTime:", NTPTimestampToTime(ntpTime), "NTPTimeasval:", UnixToTime(syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())), "cur:", UnixToTime(unixTime))
+	unixTime = syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())
 
 	if os.Getenv("ENABLED") == "1" {
 		syscall.Settimeofday(&unixTime)
@@ -1545,16 +1584,14 @@ func adjustTime(offset float64) {
 	var unixTime syscall.Timeval
 
 	ntpTime := DoubleToNTPTimestampEncoded(offset)
-	unixTime.Sec = int64(ntpTime >> 32)
-	unixTime.Usec = int32(int64((ntpTime-uint64(unixTime.Sec))<<
-		32) / eraLength * 1e6)
+	unixTime = syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())
 
 	if os.Getenv("ENABLED") == "1" {
 		syscall.Adjtime(&unixTime, nil)
 	} else if offset != 0 {
 		var now syscall.Timeval
 		syscall.Gettimeofday(&now)
-		fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(unixTime.Sec)*time.Second).Add(time.Duration(unixTime.Usec)*time.Microsecond))
+		fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(unixTime.Nano())*time.Nanosecond))
 	}
 }
 

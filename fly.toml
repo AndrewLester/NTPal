@@ -12,6 +12,7 @@ kill_timeout = 5
   NTP_PORT = "123"
   NTP_HOST = "fly-global-services"
   REPORT_PORT = "8080"
+  ENABLED = "1"
 
 [experimental]
   auto_rollback = true

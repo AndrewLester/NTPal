@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"syscall"
+	"time"
 
 	"github.com/AndrewLester/ntp/internal/templates"
 )
@@ -15,8 +17,14 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var now syscall.Timeval
+		syscall.Gettimeofday(&now)
+
+		nowTime := time.Unix(0, now.Nano())
+
 		data := map[string]string{
 			"Region": os.Getenv("FLY_REGION"),
+			"Time":   nowTime.Format("RFC3339"),
 		}
 		// time, err := ntp.Time("0.pool.ntp.org")
 		// if err != nil {
