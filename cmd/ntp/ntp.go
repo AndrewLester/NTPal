@@ -15,6 +15,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/AndrewLester/ntp/cmd/ntp/adjtime"
+	"github.com/AndrewLester/ntp/cmd/ntp/settimeofday"
 )
 
 const PORT = 123           // NTP port number
@@ -125,23 +128,7 @@ var dispatchTable = [][]DispatchCode{
 	{DSCRD, DSCRD, DSCRD, DSCRD, PROC},
 }
 
-type NTPDate struct {
-	eraNumber int32
-	eraOffset uint32
-	fraction  uint64
-}
-
-type NTPTimestamp struct {
-	seconds  uint32
-	fraction uint32
-}
-
 type NTPTimestampEncoded = uint64
-
-type NTPShort struct {
-	seconds  uint16
-	fraction uint16
-}
 
 type NTPShortEncoded = uint32
 
@@ -606,7 +593,6 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	var disp float64   /* sample dispersion */
 
 	association.leap = packet.leap
-	fmt.Println("RECEIVED WITH STRATUM:", packet.Stratum)
 	if packet.Stratum == 0 {
 		association.Stratum = MAXSTRAT
 	} else {
@@ -957,6 +943,7 @@ func (system *NTPSystem) clockSelect() {
 	system.p = nil
 
 	n := 0
+	system.m = []Chime{}
 	for _, association := range system.associations {
 		if !system.fit(association) {
 			continue
@@ -1019,6 +1006,9 @@ func (system *NTPSystem) clockSelect() {
 		chime = 0
 		for i := n - 1; i >= 0; i-- {
 			chime += system.m[i].levelType
+			if low != 2e9 {
+				fmt.Println("Already have low, finding high. Chime:", chime, "m-allow:", m-allow, "system m:", system.m)
+			}
 			if chime >= m-allow {
 				high = system.m[i].edge
 				break
@@ -1047,7 +1037,7 @@ func (system *NTPSystem) clockSelect() {
 	}
 
 	if high < low {
-		fmt.Println("Interval not found")
+		fmt.Println("Interval not found, HIGH:", high, "LOW:", low)
 		return
 	}
 
@@ -1058,6 +1048,7 @@ func (system *NTPSystem) clockSelect() {
 	 * equal, this is the order of preference.
 	 */
 	system.n = 0
+	system.v = []Survivor{}
 	for i := 0; i < n; i++ {
 		if system.m[i].edge < low || system.m[i].edge > high {
 			continue
@@ -1552,7 +1543,6 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	fmt.Println("rootdelay + delay:", float64(association.Rootdelay)+association.delay, "root disp+disp:", float64(association.Rootdisp)+association.disp, "phi*clockdiff:", PHI*float64(float64(system.clock.t)-association.t), "jitter:", association.jitter, "root disp:", float64(association.Rootdisp), "disp:", association.disp)
 	return math.Max(MINDISP, float64(association.Rootdelay)+association.delay)/2 +
 		float64(association.Rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter
 }
@@ -1564,15 +1554,24 @@ func GetSystemTime() NTPTimestampEncoded {
 }
 
 func stepTime(offset float64) {
+	fmt.Println("stepTime(offset):", offset)
+
 	var unixTime syscall.Timeval
 	syscall.Gettimeofday(&unixTime)
 
+	fmt.Println("******STEPPING")
+	fmt.Println("Now:", UnixToTime(unixTime))
 	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
-	fmt.Println("NTpTime:", NTPTimestampToTime(ntpTime), "NTPTimeasval:", UnixToTime(syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())), "cur:", UnixToTime(unixTime))
-	unixTime = syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())
+	fmt.Println("New NTPTime:", ntpTime)
+
+	Sec := int64(ntpTime >> 32)
+	Usec := int32(float64(int64(ntpTime)-(Sec<<
+		32)) / float64(eraLength) * 1e6)
+
+	fmt.Println("Unixtime Sec:", Sec, "UnixTime Usec:", Usec)
 
 	if os.Getenv("ENABLED") == "1" {
-		syscall.Settimeofday(&unixTime)
+		settimeofday.Settimeofday(Sec, Usec)
 	} else if offset != 0 {
 		var now syscall.Timeval
 		syscall.Gettimeofday(&now)
@@ -1581,17 +1580,26 @@ func stepTime(offset float64) {
 }
 
 func adjustTime(offset float64) {
-	var unixTime syscall.Timeval
+	if offset == 0 {
+		return
+	}
+
+	fmt.Println("adjustTime(offset):", offset)
 
 	ntpTime := DoubleToNTPTimestampEncoded(offset)
-	unixTime = syscall.NsecToTimeval(NTPTimestampToTime(ntpTime).UnixNano())
+
+	Sec := int64(ntpTime >> 32)
+	Usec := int32(float64(int64(ntpTime)-(Sec<<
+		32)) / float64(eraLength) * 1e6)
+
+	fmt.Println("unix timeval Sec:", Sec, "Usec", Usec)
 
 	if os.Getenv("ENABLED") == "1" {
-		syscall.Adjtime(&unixTime, nil)
+		adjtime.Adjtime(Sec, Usec)
 	} else if offset != 0 {
 		var now syscall.Timeval
 		syscall.Gettimeofday(&now)
-		fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(unixTime.Nano())*time.Nanosecond))
+		fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(Sec)*time.Second).Add(time.Duration(Usec)*time.Microsecond))
 	}
 }
 
@@ -1600,6 +1608,8 @@ func UnixToTime(t syscall.Timeval) time.Time {
 }
 
 func UnixToNTPTimestampEncoded(time syscall.Timeval) NTPTimestampEncoded {
+	// return uint64((time.Sec+unixEraOffset)<<32) +
+	// uint64(float64(time.Usec)/1e6*float64(eraLength))
 	return uint64((time.Sec+unixEraOffset)<<32) +
 		uint64(int64(time.Usec/1e6)*eraLength)
 }
@@ -1617,21 +1627,6 @@ func Log2ToDouble(a int8) float64 {
 		return 1.0 / float64(int32(1)<<-a)
 	}
 	return float64(int32(1) << a)
-}
-
-func TimeToNTPDate(time time.Time) NTPDate {
-	s := time.Unix() + unixEraOffset
-	era := s / eraLength
-	timestamp := s - era*eraLength
-	// TODO: Need to handle fraction
-	return NTPDate{eraNumber: int32(era), eraOffset: uint32(timestamp)}
-}
-
-func NTPDateToTime(ntpDate NTPDate) time.Time {
-	s := int64(ntpDate.eraNumber)*eraLength + int64(ntpDate.eraOffset)
-	// TODO: Need to handle fraction
-	time := time.Unix(s, 0)
-	return time
 }
 
 func NTPTimestampToTime(ntpTimestamp NTPTimestampEncoded) time.Time {

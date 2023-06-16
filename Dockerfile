@@ -1,4 +1,4 @@
-FROM golang
+FROM golang:1.19.3
 
 RUN apt-get update && \
     apt-get install -y \
@@ -9,6 +9,7 @@ RUN apt-get update && \
 WORKDIR /app
 COPY . /app/
 RUN rm -rf .git
+RUN go version
 RUN make
 
 ENTRYPOINT ["/app/entry.sh"]

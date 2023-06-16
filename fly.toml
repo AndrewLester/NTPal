@@ -6,7 +6,7 @@ kill_timeout = 5
 
 [processes]
   web = "bin/ntp-report"
-  ntp = "bin/ntp"
+  ntp = "bin/ntp --config ntp.conf"
 
 [env]
   NTP_PORT = "123"

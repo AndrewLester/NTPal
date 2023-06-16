@@ -24,7 +24,7 @@ func main() {
 
 		data := map[string]string{
 			"Region": os.Getenv("FLY_REGION"),
-			"Time":   nowTime.Format("RFC3339"),
+			"Time":   nowTime.Format(time.RFC3339),
 		}
 		// time, err := ntp.Time("0.pool.ntp.org")
 		// if err != nil {
