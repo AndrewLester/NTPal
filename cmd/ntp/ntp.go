@@ -319,7 +319,6 @@ func (system *NTPSystem) CreateAssociations(associationConfigs []ServerAssociati
 
 		association.burstEnabled = associationConfig.burst
 		association.iburstEnabled = associationConfig.iburst
-		association.reach = 0b11111110
 
 		associations = append(associations, association)
 	}
