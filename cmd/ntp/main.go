@@ -52,7 +52,7 @@ func main() {
 		address:   address,
 		leap:      NOSYNC,
 		stratum:   MAXSTRAT,
-		poll:      6,
+		poll:      MINPOLL,
 		precision: PRECISION,
 		conn:      udp,
 		drift:     drift,

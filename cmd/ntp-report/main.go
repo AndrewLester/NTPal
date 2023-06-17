@@ -20,7 +20,7 @@ func main() {
 		var now syscall.Timeval
 		syscall.Gettimeofday(&now)
 
-		nowTime := time.Unix(0, now.Nano())
+		nowTime := time.Unix(now.Unix())
 
 		data := map[string]string{
 			"Region": os.Getenv("FLY_REGION"),

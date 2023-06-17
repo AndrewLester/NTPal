@@ -14,11 +14,11 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/AndrewLester/ntp/cmd/ntp/adjtime"
 	"github.com/AndrewLester/ntp/cmd/ntp/settimeofday"
+	"golang.org/x/sys/unix"
 )
 
 const PORT = 123           // NTP port number
@@ -319,6 +319,7 @@ func (system *NTPSystem) CreateAssociations(associationConfigs []ServerAssociati
 
 		association.burstEnabled = associationConfig.burst
 		association.iburstEnabled = associationConfig.iburst
+		association.reach = 0b11111110
 
 		associations = append(associations, association)
 	}
@@ -659,17 +660,11 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	association.Refid = packet.Refid
 	association.Reftime = packet.Reftime
 
-	/*
-	 * Verify the server is synchronized with valid stratum and
-	 * reference time not later than the transmit time.
-	 */
+	// Server must be synchronized with valid stratum
 	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
-		return /* unsynchronized */
+		return
 	}
 
-	/*
-	 * Verify valid root distance.
-	 */
 	if association.Rootdelay/2+association.Rootdisp >= uint32(MAXDISP) || association.Reftime >
 		packet.Xmt {
 
@@ -703,10 +698,10 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			2*BDELAY
 	} else {
-		offset = (NTPTimestampEncodedToDouble(packet.Rec-packet.Org) + NTPTimestampEncodedToDouble(packet.Xmt-
-			packet.dst)) / 2
-		delay = math.Max(NTPTimestampEncodedToDouble(packet.dst-packet.Org)-NTPTimestampEncodedToDouble(packet.Xmt-
-			packet.Rec), Log2ToDouble(system.precision))
+		offset = (NTPTimestampDifferenceToDouble(float64(packet.Rec)-float64(packet.Org)) + NTPTimestampDifferenceToDouble(float64(packet.Xmt)-
+			float64(packet.dst))) / 2
+		delay = math.Max(NTPTimestampDifferenceToDouble(float64(packet.dst)-float64(packet.Org))-NTPTimestampDifferenceToDouble(float64(packet.Xmt)-
+			float64(packet.Rec)), Log2ToDouble(system.precision))
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			NTPTimestampEncodedToDouble(packet.dst-packet.Org)
 	}
@@ -1591,26 +1586,26 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 }
 
 func GetSystemTime() NTPTimestampEncoded {
-	var unixTime syscall.Timeval
-	syscall.Gettimeofday(&unixTime)
+	var unixTime unix.Timeval
+	unix.Gettimeofday(&unixTime)
 	return (UnixToNTPTimestampEncoded(unixTime))
 }
 
 func stepTime(offset float64) {
-	var unixTime syscall.Timeval
-	syscall.Gettimeofday(&unixTime)
+	var unixTime unix.Timeval
+	unix.Gettimeofday(&unixTime)
 	old := unixTime
 
 	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
 
 	Sec := int64(ntpTime >> 32)
-	Usec := int32(float64(int64(ntpTime)-(Sec<<
-		32)) / float64(eraLength) * 1e6)
+	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
+		32)) / float64(eraLength) * 1e6))
 	Sec -= unixEraOffset
 
-	var now syscall.Timeval
-	syscall.Gettimeofday(&now)
-	fmt.Println("CURRENT:", UnixToTime(old), "STEPPING TO:", time.Unix(Sec, int64(Usec)*1e3), "OFFSET WAS:", offset)
+	var now unix.Timeval
+	unix.Gettimeofday(&now)
+	fmt.Println("CURRENT:", UnixToTime(old), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
 	if os.Getenv("ENABLED") == "1" {
 		fmt.Println("SETTIMEOFDAYERR:", settimeofday.Settimeofday(Sec, Usec))
 	} else if offset != 0 {
@@ -1626,27 +1621,27 @@ func adjustTime(offset float64) {
 	ntpTime := DoubleToNTPTimestampEncoded(offset)
 
 	Sec := int64(ntpTime >> 32)
-	Usec := int32(float64(int64(ntpTime)-(Sec<<
-		32)) / float64(eraLength) * 1e6)
+	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
+		32)) / float64(eraLength) * 1e6))
 
 	if os.Getenv("ENABLED") == "1" {
 		adjtime.Adjtime(Sec, Usec)
 	} else if offset != 0 {
-		var now syscall.Timeval
-		syscall.Gettimeofday(&now)
+		var now unix.Timeval
+		unix.Gettimeofday(&now)
 		// fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(Sec)*time.Second).Add(time.Duration(Usec)*time.Microsecond))
 	}
 }
 
-func UnixToTime(t syscall.Timeval) time.Time {
-	return time.Unix(0, t.Nano())
+func UnixToTime(t unix.Timeval) time.Time {
+	return time.Unix(t.Unix())
 }
 
-func UnixToNTPTimestampEncoded(time syscall.Timeval) NTPTimestampEncoded {
+func UnixToNTPTimestampEncoded(time unix.Timeval) NTPTimestampEncoded {
 	// return uint64((time.Sec+unixEraOffset)<<32) +
 	// uint64(float64(time.Usec)/1e6*float64(eraLength))
 	return uint64((time.Sec+unixEraOffset)<<32) +
-		uint64(int64(time.Usec/1e6)*eraLength)
+		uint64(float64(time.Usec)/1e6*float64(eraLength))
 }
 
 func DoubleToNTPTimestampEncoded(offset float64) NTPTimestampEncoded {
@@ -1657,6 +1652,10 @@ func NTPTimestampEncodedToDouble(ntpTimestamp NTPTimestampEncoded) float64 {
 	return float64(ntpTimestamp) / float64(eraLength)
 }
 
+func NTPTimestampDifferenceToDouble(difference float64) float64 {
+	return difference / float64(eraLength)
+}
+
 func Log2ToDouble(a int8) float64 {
 	if a < 0 {
 		return 1.0 / float64(int32(1)<<-a)
@@ -1665,8 +1664,11 @@ func Log2ToDouble(a int8) float64 {
 }
 
 func NTPTimestampToTime(ntpTimestamp NTPTimestampEncoded) time.Time {
-	now := NTPTimestampEncodedToDouble(ntpTimestamp)
-	return time.Unix(int64(now)-unixEraOffset, int64(now*1e6)%1e6)
+	Sec := int64(ntpTimestamp >> 32)
+	Usec := int32(math.Round(float64(int64(ntpTimestamp)-(Sec<<
+		32)) / float64(eraLength) * 1e6))
+	Sec -= unixEraOffset
+	return time.Unix(Sec, int64(Usec)*1e3)
 }
 
 func containsAssociation(survivors []Survivor, association *Association) bool {
