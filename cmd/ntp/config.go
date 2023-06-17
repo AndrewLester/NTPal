@@ -47,7 +47,7 @@ func ParseConfig(path string) []ServerAssociationConfig {
 
 			address, err := net.ResolveUDPAddr("udp", arguments[1]+":123")
 			if err != nil {
-				configParseError("Invalid address")
+				configParseError("Invalid address: ", arguments[1])
 			}
 			fmt.Println(arguments[1], "resolved to:", address.IP)
 
@@ -149,6 +149,6 @@ func RemoveIndex[T any](s *[]T, index int) {
 }
 
 func configParseError(args ...any) {
-	log.Print("Config parse error: ")
+	args = append([]any{"Config parse error: "}, args...)
 	log.Fatal(args...)
 }

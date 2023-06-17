@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -30,8 +29,6 @@ func main() {
 
 	associationConfigs := ParseConfig(config)
 
-	fmt.Println("Association configs:", associationConfigs)
-
 	port := os.Getenv("NTP_PORT")
 	if port == "" {
 		port = "123"
@@ -55,7 +52,7 @@ func main() {
 		address:   address,
 		leap:      NOSYNC,
 		stratum:   MAXSTRAT,
-		poll:      MINPOLL,
+		poll:      6,
 		precision: PRECISION,
 		conn:      udp,
 		drift:     drift,
@@ -78,7 +75,6 @@ func handleUDP(c *net.UDPConn, system *NTPSystem, wg *sync.WaitGroup) {
 	packet := make([]byte, MTU)
 
 	for {
-		fmt.Println("Reading...")
 		_, addr, err := c.ReadFrom(packet)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {

@@ -11,3 +11,5 @@ To get started:
 ## Development
 
 1. `flyctl deploy`
+
+    make && sudo -E ./bin/ntp --config ntp.conf

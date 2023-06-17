@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -23,7 +24,7 @@ import (
 const PORT = 123           // NTP port number
 const VERSION byte = 4     // NTP version number
 const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 4     //minimum poll exponent (16 s)
+const MINPOLL int8 = 6     //minimum poll exponent (16 s)
 const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
@@ -157,6 +158,8 @@ type NTPSystem struct {
 	clock        Clock
 	conn         *net.UDPConn
 	drift        string
+
+	lock sync.Mutex
 }
 
 type Association struct {
@@ -216,6 +219,19 @@ type Survivor struct {
 	metric      float64
 }
 
+type Survivors []Survivor
+
+func (s Survivors) Len() int      { return len(s) }
+func (s Survivors) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+type ByMetric struct {
+	Survivors
+}
+
+func (s ByMetric) Less(i, j int) bool {
+	return s.Survivors[i].metric < s.Survivors[j].metric
+}
+
 // "t" is process time, not realtime. Only second incrementing
 type Clock struct {
 	t      NTPTimestampEncoded
@@ -249,7 +265,7 @@ func (s ByDelay) Less(i, j int) bool {
 }
 
 // Fields that can be read directly from the packet bytes
-type EncodedReceivePacket struct {
+type NTPFieldsEncoded struct {
 	Stratum   byte                /* stratum */
 	Poll      int8                /* poll interval */
 	Precision int8                /* precision */
@@ -271,7 +287,7 @@ type ReceivePacket struct {
 	keyid   int32               /* key ID */
 	mac     Digest              /* message digest */
 	dst     NTPTimestampEncoded /* destination timestamp */
-	EncodedReceivePacket
+	NTPFieldsEncoded
 }
 
 type TransmitPacket struct {
@@ -282,7 +298,7 @@ type TransmitPacket struct {
 	mode    Mode         /* mode */
 	keyid   int          /* key ID */
 	dgst    Digest       /* message digest */
-	EncodedReceivePacket
+	NTPFieldsEncoded
 }
 
 func (system *NTPSystem) CreateAssociations(associationConfigs []ServerAssociationConfig) []*Association {
@@ -344,6 +360,8 @@ func (system *NTPSystem) clockAdjust() {
 	dtemp := system.clock.offset / (float64(PLL) * math.Min(Log2ToDouble(system.poll), float64(ALLAN)))
 	system.clock.offset -= dtemp
 
+	system.lock.Lock()
+	defer system.lock.Unlock()
 	/*
 	 * This is the kernel adjust time function, usually implemented
 	 * by the Unix adjtime() system call.
@@ -356,7 +374,7 @@ func (system *NTPSystem) clockAdjust() {
 	 */
 	for _, association := range system.associations {
 		if system.clock.t >= uint64(association.nextdate) {
-			fmt.Println("Polling:", association.srcaddr.IP)
+			fmt.Println("SEND POLL:", association.srcaddr.IP.String())
 			system.sendPoll(association)
 		}
 	}
@@ -369,6 +387,44 @@ func (system *NTPSystem) clockAdjust() {
 	 * if (c.t % 3600 == 3599)
 	 *   write c.freq to file
 	 */
+
+	if system.clock.t%10 == 0 {
+		fmt.Println("*****REPORT:")
+		fmt.Println(
+			"(SYSTEM):",
+			"OFFSET:", system.offset,
+			"JITTER:", system.jitter,
+		)
+		fmt.Println(
+			"(CLOCK):",
+			"T:", system.clock.t,
+			"OFFSET:", system.clock.offset,
+			"JITTER:", system.clock.jitter,
+			"WANDER:", system.clock.wander,
+		)
+		for _, association := range system.associations {
+			refidVal := "_IP_"
+			if association.Stratum == 1 {
+				refidBin := make([]byte, 4)
+				binary.BigEndian.PutUint32(refidBin, association.Refid)
+				refidVal = string(refidBin)
+			}
+			sync := "SYNC"
+			if association.leap == NOSYNC {
+				sync = "NOSYNC"
+			}
+			fmt.Println(
+				"("+association.srcaddr.IP.String()+"):",
+				sync,
+				"POLL:", strconv.Itoa(int(Log2ToDouble(association.Poll)))+"s",
+				"STRATUM:", association.Stratum,
+				"REFID:", refidVal,
+				"OFFSET:", association.offset,
+				"JITTER:", association.jitter,
+				"TIME FILTERED:", association.t,
+			)
+		}
+	}
 }
 
 func (system *NTPSystem) sendPoll(association *Association) {
@@ -414,8 +470,8 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		system.pollUpdate(association, hpoll)
 		return
 	}
-	if association.burst == 0 {
 
+	if association.burst == 0 {
 		/*
 		 * We are not in a burst.  Shift the reachability
 		 * register to the left.  Hopefully, some time before
@@ -504,18 +560,18 @@ func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	version = (firstByte >> 3) & 0b111
 	mode = firstByte & 0b111
 
-	encodedReceivePacket := EncodedReceivePacket{}
-	if err := binary.Read(reader, binary.BigEndian, &encodedReceivePacket); err != nil {
+	ntpFieldsEncoded := NTPFieldsEncoded{}
+	if err := binary.Read(reader, binary.BigEndian, &ntpFieldsEncoded); err != nil {
 		return nil, err
 	}
 
 	return &ReceivePacket{
-		srcaddr:              clientUDPAddr,
-		dstaddr:              localUDPAddr,
-		leap:                 leap,
-		version:              version,
-		mode:                 Mode(mode),
-		EncodedReceivePacket: encodedReceivePacket,
+		srcaddr:          clientUDPAddr,
+		dstaddr:          localUDPAddr,
+		leap:             leap,
+		version:          version,
+		mode:             Mode(mode),
+		NTPFieldsEncoded: ntpFieldsEncoded,
 	}, nil
 }
 
@@ -523,13 +579,11 @@ func EncodeTransmitPacket(packet TransmitPacket) []byte {
 	var buffer bytes.Buffer
 	firstByte := (packet.leap << 6) | (packet.version << 3) | byte(packet.mode)
 	binary.Write(&buffer, binary.BigEndian, firstByte)
-	binary.Write(&buffer, binary.BigEndian, &packet.EncodedReceivePacket)
+	binary.Write(&buffer, binary.BigEndian, &packet.NTPFieldsEncoded)
 	return buffer.Bytes()
 }
 
 func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
-	fmt.Println("Received packet from:", packet.srcaddr.IP)
-
 	if packet.version > VERSION {
 		return nil
 	}
@@ -622,6 +676,9 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		return /* invalid header values */
 	}
 
+	system.lock.Lock()
+	defer system.lock.Unlock()
+
 	system.pollUpdate(association, association.hpoll)
 	association.reach |= 1
 
@@ -653,8 +710,6 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			NTPTimestampEncodedToDouble(packet.dst-packet.Org)
 	}
-
-	fmt.Println("Packet processed")
 
 	system.clockFilter(association, offset, delay, disp)
 }
@@ -753,17 +808,16 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		firstByte |= byte(transmitPacket.mode)
 
 		writer.WriteByte(firstByte)
-		if err := binary.Write(writer, binary.BigEndian, transmitPacket.EncodedReceivePacket); err != nil {
+		if err := binary.Write(writer, binary.BigEndian, transmitPacket.NTPFieldsEncoded); err != nil {
 			panic("encoded transmit packet err")
 		}
 
 		writer.Flush()
 
-		written, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
+		_, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
 		if err != nil {
 			fmt.Println("Error", err)
 		}
-		fmt.Println("written", written, "to:", transmitPacket.dstaddr.String())
 	}()
 }
 
@@ -842,8 +896,6 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 }
 
 func (system *NTPSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
-	fmt.Println("Filtering")
-
 	var f [NSTAGE]FilterStage
 
 	/*
@@ -926,7 +978,6 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 }
 
 func (system *NTPSystem) clockSelect() {
-	fmt.Println("selection")
 	/*
 	 * We first cull the falsetickers from the server population,
 	 * leaving only the truechimers.  The correctness interval for
@@ -951,8 +1002,8 @@ func (system *NTPSystem) clockSelect() {
 
 		system.m = append(system.m, Chime{
 			association: association,
-			levelType:   1,
-			edge:        association.offset + system.rootDist(association),
+			levelType:   -1,
+			edge:        association.offset - system.rootDist(association),
 		})
 		system.m = append(system.m, Chime{
 			association: association,
@@ -961,8 +1012,8 @@ func (system *NTPSystem) clockSelect() {
 		})
 		system.m = append(system.m, Chime{
 			association: association,
-			levelType:   -1,
-			edge:        association.offset - system.rootDist(association),
+			levelType:   1,
+			edge:        association.offset + system.rootDist(association),
 		})
 
 		n += 3
@@ -989,7 +1040,6 @@ func (system *NTPSystem) clockSelect() {
 		chime := 0
 		for i := 0; i < n; i++ {
 			chime -= system.m[i].levelType
-			fmt.Println("edge:", system.m[i].edge, "level:", system.m[i].levelType, "chime:", chime, "m-allow:", m-allow)
 			if chime >= m-allow {
 				low = system.m[i].edge
 				break
@@ -1006,9 +1056,6 @@ func (system *NTPSystem) clockSelect() {
 		chime = 0
 		for i := n - 1; i >= 0; i-- {
 			chime += system.m[i].levelType
-			if low != 2e9 {
-				fmt.Println("Already have low, finding high. Chime:", chime, "m-allow:", m-allow, "system m:", system.m)
-			}
 			if chime >= m-allow {
 				high = system.m[i].edge
 				break
@@ -1037,7 +1084,6 @@ func (system *NTPSystem) clockSelect() {
 	}
 
 	if high < low {
-		fmt.Println("Interval not found, HIGH:", high, "LOW:", low)
 		return
 	}
 
@@ -1068,10 +1114,11 @@ func (system *NTPSystem) clockSelect() {
 	 * require four survivors, but for the demonstration here, one
 	 * is acceptable.
 	 */
-	fmt.Println("System n left", system.n)
 	if system.n < NSANE {
 		return
 	}
+
+	sort.Sort(ByMetric{system.v})
 
 	/*
 	 * For each association p in turn, calculate the selection
@@ -1092,7 +1139,7 @@ func (system *NTPSystem) clockSelect() {
 				min = p.jitter
 			}
 			dtemp = 0
-			for j := 0; j < n; j++ {
+			for j := 0; j < system.n; j++ {
 				q = system.v[j].association
 				dtemp += math.Pow(p.offset-q.offset, 2)
 			}
@@ -1127,8 +1174,7 @@ func (system *NTPSystem) clockSelect() {
 				break
 			}
 		}
-		survivors := system.v[:]
-		RemoveIndex(&survivors, qmaxIdx)
+		RemoveIndex(&system.v, qmaxIdx)
 		system.n--
 	}
 
@@ -1138,8 +1184,7 @@ func (system *NTPSystem) clockSelect() {
 	 * then don't do a clock hop.  Otherwise, select the first
 	 * survivor on the list as the new system peer.
 	 */
-	fmt.Println("osys:", osys, "system.v[0]:", system.v[0])
-	if osys != nil && osys.Stratum == system.v[0].association.Stratum {
+	if osys != nil && osys.Stratum == system.v[0].association.Stratum && containsAssociation(system.v, osys) {
 		system.p = osys
 	} else {
 		system.p = system.v[0].association
@@ -1149,8 +1194,6 @@ func (system *NTPSystem) clockSelect() {
 }
 
 func (system *NTPSystem) clockUpdate(association *Association) {
-	fmt.Println("Clock update, offset:", time.Now().Add(time.Duration(system.offset)*time.Second))
-
 	var dtemp float64
 
 	/*
@@ -1169,7 +1212,6 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 	//  TODO: Fix type error after removing cast hereV
 	system.t = uint64(association.t)
 	system.clockCombine()
-	fmt.Println("After combine, offset:", time.Now().Add(time.Duration(system.offset)*time.Second))
 
 	switch system.localClock(association, system.offset) {
 	/*
@@ -1299,7 +1341,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 }
 
 func (system *NTPSystem) localClock(association *Association, offset float64) LocalClockReturnCode {
-	fmt.Println("Local clock discipline")
+	fmt.Println("LocalCLock")
 	var state int
 	var freq, mu float64
 	var rval LocalClockReturnCode
@@ -1322,6 +1364,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	mu = association.t - float64(system.t)
 	freq = 0
 	if math.Abs(offset) > STEPT {
+		fmt.Println("Offset > STEPT (0.128)", "|STATE:", system.clock.state, "|OFFSET:", offset)
 		switch system.clock.state {
 		/*
 		 * In S_SYNC state, we ignore the first outlier and
@@ -1353,7 +1396,6 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		 */
 		case SPIK:
 			if mu < WATCH {
-
 				return IGNORE
 			}
 
@@ -1386,7 +1428,6 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		 * poll intervals.
 		 */
 		default:
-
 			/*
 			 * This is the kernel set time function, usually
 			 * implemented by the Unix settimeofday() system
@@ -1401,13 +1442,14 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 				return rval
 			}
 		}
+		fmt.Println("SWITCH DIDNT WORK???", system.clock.state)
 		system.rstclock(SYNC, association.t, 0)
 	} else {
-
+		fmt.Println("OFFSET < STEPT (0.128)", "|STATE:", system.clock.state, "|OFFSET:", offset)
 		/*
-		 * Compute the clock jitter as the RMS of exponentially
-		 * weighted offset differences.  This is used by the
-		 * poll-adjust code.
+		* Compute the clock jitter as the RMS of exponentially
+		* weighted offset differences.  This is used by the
+		* poll-adjust code.
 		 */
 		etemp = math.Pow(system.clock.jitter, 2)
 		dtemp = math.Pow(math.Max(math.Abs(offset-system.clock.last),
@@ -1501,6 +1543,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	 * increased; otherwise, it is decreased.  A bit of hysteresis
 	 * helps calm the dance.  Works best using burst mode.
 	 */
+	fmt.Println("CLOCK OFFSET:", system.clock.offset, "PGATE*system.clock.jitter:", PGATE*system.clock.jitter)
 	if math.Abs(system.clock.offset) < PGATE*system.clock.jitter {
 		system.clock.count += int32(system.poll)
 		if system.clock.count > LIMIT {
@@ -1554,28 +1597,24 @@ func GetSystemTime() NTPTimestampEncoded {
 }
 
 func stepTime(offset float64) {
-	fmt.Println("stepTime(offset):", offset)
-
 	var unixTime syscall.Timeval
 	syscall.Gettimeofday(&unixTime)
+	old := unixTime
 
-	fmt.Println("******STEPPING")
-	fmt.Println("Now:", UnixToTime(unixTime))
 	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
-	fmt.Println("New NTPTime:", ntpTime)
 
 	Sec := int64(ntpTime >> 32)
 	Usec := int32(float64(int64(ntpTime)-(Sec<<
 		32)) / float64(eraLength) * 1e6)
+	Sec -= unixEraOffset
 
-	fmt.Println("Unixtime Sec:", Sec, "UnixTime Usec:", Usec)
-
+	var now syscall.Timeval
+	syscall.Gettimeofday(&now)
+	fmt.Println("CURRENT:", UnixToTime(old), "STEPPING TO:", time.Unix(Sec, int64(Usec)*1e3), "OFFSET WAS:", offset)
 	if os.Getenv("ENABLED") == "1" {
-		settimeofday.Settimeofday(Sec, Usec)
+		fmt.Println("SETTIMEOFDAYERR:", settimeofday.Settimeofday(Sec, Usec))
 	} else if offset != 0 {
-		var now syscall.Timeval
-		syscall.Gettimeofday(&now)
-		fmt.Println("CURRENT:", UnixToTime(now), "STEPPING TO:", UnixToTime(unixTime))
+		//pass
 	}
 }
 
@@ -1584,22 +1623,18 @@ func adjustTime(offset float64) {
 		return
 	}
 
-	fmt.Println("adjustTime(offset):", offset)
-
 	ntpTime := DoubleToNTPTimestampEncoded(offset)
 
 	Sec := int64(ntpTime >> 32)
 	Usec := int32(float64(int64(ntpTime)-(Sec<<
 		32)) / float64(eraLength) * 1e6)
 
-	fmt.Println("unix timeval Sec:", Sec, "Usec", Usec)
-
 	if os.Getenv("ENABLED") == "1" {
 		adjtime.Adjtime(Sec, Usec)
 	} else if offset != 0 {
 		var now syscall.Timeval
 		syscall.Gettimeofday(&now)
-		fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(Sec)*time.Second).Add(time.Duration(Usec)*time.Microsecond))
+		// fmt.Println("CURRENT:", UnixToTime(now), "ADJTIME TO:", UnixToTime(now).Add(time.Duration(Sec)*time.Second).Add(time.Duration(Usec)*time.Microsecond))
 	}
 }
 
@@ -1632,4 +1667,13 @@ func Log2ToDouble(a int8) float64 {
 func NTPTimestampToTime(ntpTimestamp NTPTimestampEncoded) time.Time {
 	now := NTPTimestampEncodedToDouble(ntpTimestamp)
 	return time.Unix(int64(now)-unixEraOffset, int64(now*1e6)%1e6)
+}
+
+func containsAssociation(survivors []Survivor, association *Association) bool {
+	for _, survivor := range survivors {
+		if survivor.association == association {
+			return true
+		}
+	}
+	return false
 }
