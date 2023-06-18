@@ -45,7 +45,7 @@ const BCOUNT = 8   /* packets in a burst */
 const BTIME = 2    /* burst interval (s) */
 
 const STEPT = .128      /* step threshold (s) */
-const WATCH = 120       /* stepout threshold (s) */
+const WATCH = 900       /* stepout threshold (s) */
 const PANICT = 1000     /* panic threshold (s) */
 const PLL = 65536       /* PLL loop gain */
 const FLL = MAXPOLL + 1 /* FLL loop gain */
@@ -484,6 +484,9 @@ func (system *NTPSystem) clockAdjust() {
 				if err != nil {
 					log.Fatal("Could not create drift file")
 				}
+			} else {
+				file.Truncate(0)
+				file.Seek(0, 0)
 			}
 			defer file.Close()
 

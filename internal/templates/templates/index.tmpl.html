@@ -9,6 +9,7 @@
             href="https://fonts.googleapis.com/css2?family=Oswald&display=swap"
             rel="stylesheet"
         />
+        <link rel="icon" href="https://andrewlester.net/favicon.ico" />
         <style>
             h1 a {
                 font-family: 'Oswald';
@@ -57,7 +58,7 @@
                         ntpTimestampToDouble(
                             synchronizeRes.Xmt - synchronizeRes.Dst
                         )) /
-                        2n
+                        2
                 );
 
                 const offsetMessage = offset < 0 ? 'ahead' : 'behind';
@@ -86,8 +87,12 @@
                 );
             }
 
+            const decimalFactor = Math.pow(10, 3);
             function ntpTimestampToDouble(ntpTimestamp) {
-                return ntpTimestamp / eraLength;
+                return (
+                    Number((ntpTimestamp * BigInt(decimalFactor)) / eraLength) /
+                    decimalFactor
+                );
             }
 
             synchronize();
