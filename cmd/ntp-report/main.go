@@ -1,14 +1,25 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/AndrewLester/ntp/internal/templates"
+	"github.com/AndrewLester/ntp/pkg/ntp"
 )
+
+type SyncRequest struct {
+	Orig string
+}
+
+type SyncResponse struct {
+	Orig, Recv, Xmt string
+}
 
 func main() {
 	port := os.Getenv("REPORT_PORT")
@@ -36,8 +47,26 @@ func main() {
 
 		// fmt.Printf("Our time: %v\n", time.Local())
 
-		templates.TemplateExecutor.ExecuteTemplate(w, "index.html.tmpl", data)
+		templates.TemplateExecutor.ExecuteTemplate(w, "index.tmpl.html", data)
+	})
 
+	http.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
+		var syncRequest SyncRequest
+		err := json.NewDecoder(r.Body).Decode(&syncRequest)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		recv := strconv.FormatUint(ntp.GetSystemTime(), 10)
+
+		xmt := ntp.GetSystemTime()
+		syncResponse := SyncResponse{
+			Orig: syncRequest.Orig,
+			Recv: recv,
+			Xmt:  strconv.FormatUint(xmt, 10),
+		}
+
+		json.NewEncoder(w).Encode(syncResponse)
 	})
 
 	log.Println("listening on", port)

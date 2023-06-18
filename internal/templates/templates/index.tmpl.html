@@ -1,0 +1,96 @@
+{{- /* Go Template */ -}}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Time</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Oswald&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            h1 a {
+                font-family: 'Oswald';
+                text-transform: uppercase;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>
+            <a href="https://time.andrewlester.net">time.andrewlester.net</a>
+        </h1>
+        <p>
+            According to this server, the date is
+            <span id="time">synchronzing...</span>. Your device's time is
+            <span id="offset">synchronizing...</span>
+        </p>
+        {{ if .Region }}
+        <p>Server running in the {{.Region}} region</p>
+        {{ end }}
+
+        <script>
+            const elems = {
+                time: document.getElementById('time'),
+                offset: document.getElementById('offset'),
+            };
+
+            let offset = 0;
+
+            async function synchronize() {
+                const synchronizeRes = await fetch('/sync', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        Orig: getSystemTime().toString(),
+                    }),
+                    headers: { 'content-type': 'application/json' },
+                }).then((res) => res.json());
+                synchronizeRes.Dst = getSystemTime();
+                synchronizeRes.Orig = BigInt(synchronizeRes.Orig);
+                synchronizeRes.Recv = BigInt(synchronizeRes.Recv);
+                synchronizeRes.Xmt = BigInt(synchronizeRes.Xmt);
+
+                offset = Number(
+                    (ntpTimestampToDouble(
+                        synchronizeRes.Recv - synchronizeRes.Orig
+                    ) +
+                        ntpTimestampToDouble(
+                            synchronizeRes.Xmt - synchronizeRes.Dst
+                        )) /
+                        2n
+                );
+
+                const offsetMessage = offset < 0 ? 'ahead' : 'behind';
+                elems.offset.textContent = `${offsetMessage} by ${offset.toFixed(
+                    3
+                )} seconds`;
+
+                elems.time.textContent = new Date(
+                    (Date.now() / 1e3 + offset) * 1e3
+                ).toLocaleString('en', {
+                    dateStyle: 'full',
+                    timeStyle: 'full',
+                });
+            }
+
+            const eraLength = 4_294_967_296n; // 2^32
+            const unixEraOffset = 2_208_988_800; // 1970 - 1900 in seconds
+
+            function getSystemTime() {
+                const now = Date.now();
+                const seconds = Math.trunc(now / 1e3);
+                const millis = now % 1e3;
+                return (
+                    BigInt(seconds + unixEraOffset) * eraLength +
+                    BigInt(Math.trunc(millis / 1e3)) * eraLength
+                );
+            }
+
+            function ntpTimestampToDouble(ntpTimestamp) {
+                return ntpTimestamp / eraLength;
+            }
+
+            synchronize();
+        </script>
+    </body>
+</html>
