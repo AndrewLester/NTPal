@@ -663,6 +663,11 @@ func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
 		hmode = association.hmode
 	}
 
+	if packet.mode > 5 {
+		fmt.Println("ERROR: Received packet.mode > 5 for association with addr:", packet.srcaddr.IP)
+		return nil
+	}
+
 	switch dispatchTable[hmode][packet.mode-1] {
 	case FXMIT:
 		// If the destination address is not a broadcast
