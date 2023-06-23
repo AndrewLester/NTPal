@@ -60,7 +60,7 @@ func ParseConfig(path string) []ServerAssociationConfig {
 			maxpoll := integerArgument("maxpoll", DEFAULT_MAXPOLL, &arguments)
 
 			if len(arguments) > 2 {
-				configParseError("Invalid arguments supplied to command")
+				configParseError("Invalid arguments supplied to command. One was: \"", arguments[2], "\"")
 			}
 
 			if version != int(VERSION) {
@@ -91,7 +91,8 @@ func ParseConfig(path string) []ServerAssociationConfig {
 				hmode:   CLIENT,
 			}
 			serverAssociations = append(serverAssociations, serverAssociation)
-
+		case "#":
+			// Comment
 		default:
 			configParseError("Invalid command: ", arguments[0])
 		}

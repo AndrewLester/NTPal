@@ -2,9 +2,7 @@ package main
 
 import (
 	"flag"
-	"math/rand"
 	"os"
-	"time"
 
 	"github.com/AndrewLester/ntp/pkg/ntp"
 )
@@ -18,8 +16,6 @@ func main() {
 	flag.StringVar(&config, "config", DEFAULT_CONFIG_PATH, "Path to the NTP config file.")
 	flag.StringVar(&drift, "drift", DEFAULT_DRIFT_PATH, "Path to the NTP drift file.")
 	flag.Parse()
-
-	rand.Seed(time.Now().UnixNano())
 
 	port := os.Getenv("NTP_PORT")
 	if port == "" {

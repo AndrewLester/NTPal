@@ -4,15 +4,15 @@ app = "ntp"
 kill_signal = "SIGINT"
 kill_timeout = 5
 
-[processes]
-  web = "bin/ntp-report"
-  ntp = "bin/ntp --config ntp.conf"
-
 [env]
   NTP_PORT = "123"
   NTP_HOST = "fly-global-services"
   REPORT_PORT = "8080"
-  ENABLED = "1"
+  ENABLED = "0"
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
 
 [experimental]
   auto_rollback = true
@@ -20,7 +20,6 @@ kill_timeout = 5
 [[services]]
   internal_port = 123
   protocol = "udp"
-  processes = ["ntp"]
 
   [[services.ports]]
     port = 123
@@ -29,7 +28,6 @@ kill_timeout = 5
   http_checks = []
   internal_port = 8080
   min_machines_running = 0
-  processes = ["web"]
   protocol = "tcp"
   script_checks = []
   [services.concurrency]

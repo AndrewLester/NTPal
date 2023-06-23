@@ -10,16 +10,31 @@
             rel="stylesheet"
         />
         <link rel="icon" href="https://andrewlester.net/favicon.ico" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <style>
-            h1 a {
+            h1 {
                 font-family: 'Oswald';
                 text-transform: uppercase;
+            }
+
+            h1 a {
+                color: black;
+                transition: color 100ms ease;
+            }
+
+            h1 a:first-child:hover {
+                color: rgb(171, 25, 25);
+            }
+
+            h1 a:nth-child(2):hover {
+                color: rgb(21, 167, 21);
             }
         </style>
     </head>
     <body>
         <h1>
-            <a href="https://time.andrewlester.net">time.andrewlester.net</a>
+            <a href="/">time.</a
+            ><a href="https://andrewlester.net">andrewlester.net</a>
         </h1>
         <p>
             According to this server, the date is
@@ -36,9 +51,31 @@
                 offset: document.getElementById('offset'),
             };
 
-            let offset = 0;
-
             async function synchronize() {
+                const offsets = [];
+                for (let i = 0; i < 4; i++) {
+                    offsets.push(await syncRequest());
+                    await sleep(250);
+                }
+
+                const offset =
+                    offsets.reduce((prev, cur) => prev + cur, 0) /
+                    offsets.length;
+
+                const offsetMessage = offset < 0 ? 'ahead' : 'behind';
+                elems.offset.textContent = `${offsetMessage} by ${Math.abs(
+                    offset
+                ).toFixed(3)} seconds`;
+
+                elems.time.textContent = new Date(
+                    (Date.now() / 1e3 + offset) * 1e3
+                ).toLocaleString('en', {
+                    dateStyle: 'full',
+                    timeStyle: 'full',
+                });
+            }
+
+            async function syncRequest() {
                 const synchronizeRes = await fetch('/sync', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -49,9 +86,17 @@
                 synchronizeRes.Dst = getSystemTime();
                 synchronizeRes.Orig = BigInt(synchronizeRes.Orig);
                 synchronizeRes.Recv = BigInt(synchronizeRes.Recv);
+                console.log(synchronizeRes.Xmt, BigInt(synchronizeRes.Xmt));
                 synchronizeRes.Xmt = BigInt(synchronizeRes.Xmt);
 
-                offset = Number(
+                console.log(
+                    synchronizeRes.Recv,
+                    synchronizeRes.Orig,
+                    synchronizeRes.Xmt,
+                    synchronizeRes.Dst
+                );
+
+                return Number(
                     (ntpTimestampToDouble(
                         synchronizeRes.Recv - synchronizeRes.Orig
                     ) +
@@ -60,18 +105,6 @@
                         )) /
                         2
                 );
-
-                const offsetMessage = offset < 0 ? 'ahead' : 'behind';
-                elems.offset.textContent = `${offsetMessage} by ${offset.toFixed(
-                    3
-                )} seconds`;
-
-                elems.time.textContent = new Date(
-                    (Date.now() / 1e3 + offset) * 1e3
-                ).toLocaleString('en', {
-                    dateStyle: 'full',
-                    timeStyle: 'full',
-                });
             }
 
             const eraLength = 4_294_967_296n; // 2^32
@@ -87,12 +120,17 @@
                 );
             }
 
+            // We only know MS from Date.now()
             const decimalFactor = Math.pow(10, 3);
             function ntpTimestampToDouble(ntpTimestamp) {
                 return (
                     Number((ntpTimestamp * BigInt(decimalFactor)) / eraLength) /
                     decimalFactor
                 );
+            }
+
+            function sleep(millis) {
+                return new Promise((resolve) => setTimeout(resolve, millis));
             }
 
             synchronize();

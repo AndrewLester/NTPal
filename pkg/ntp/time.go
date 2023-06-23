@@ -1,7 +1,6 @@
 package ntp
 
 import (
-	"fmt"
 	"math"
 	"os"
 	"time"
@@ -25,11 +24,11 @@ func stepTime(offset float64) {
 
 	var now unix.Timeval
 	unix.Gettimeofday(&now)
-	fmt.Println("CURRENT:", UnixToTime(old), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
+	info("CURRENT:", UnixToTime(old), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
 	if os.Getenv("ENABLED") == "1" {
 		err := settimeofday.Settimeofday(Sec, Usec)
 		if err != nil {
-			fmt.Println("SETTIMEOFDAYERR:", err)
+			info("SETTIMEOFDAYERR:", err)
 		}
 	}
 }
@@ -44,12 +43,19 @@ func adjustTime(offset float64) {
 
 	Sec := int64(ntpTime>>32) * int64(sign)
 	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
-		32))/float64(eraLength)*1e6)) * int32(sign)
+		32)) / float64(eraLength) * 1e6))
+
+	if sign < 0 && Sec == 0 {
+		Sec = -1
+		Usec += 1e6
+	}
+
+	info("Adjust time:", Sec, Usec)
 
 	if os.Getenv("ENABLED") == "1" {
 		err := adjtime.Adjtime(Sec, Usec)
 		if err != nil {
-			fmt.Println("ADJTIME ERROR:", err)
+			info("ADJTIME ERROR:", err, "offset:", offset)
 		}
 	}
 }
