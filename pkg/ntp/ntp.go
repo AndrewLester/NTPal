@@ -48,7 +48,7 @@ const STEPT = .128     /* step threshold (s) */
 const WATCH = 900      /* stepout threshold (s) */
 const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
-const FLL = 8          /* FLL loop gain */
+const FLL = 4          /* FLL loop gain */
 const AVG = 4          /* parameter averaging constant */
 const ALLAN = 1024     /* compromise Allan intercept (s) */
 const LIMIT = 30       /* poll-adjust threshold */
@@ -325,6 +325,7 @@ func NewNTPSystem(host, port, config, drift string) *NTPSystem {
 		leap:      NOSYNC,
 		poll:      MINPOLL,
 		precision: PRECISION,
+		hold:      WATCH,
 	}
 }
 
@@ -471,6 +472,9 @@ func (system *NTPSystem) clockAdjust() {
 	dtemp := system.clock.offset / (float64(PLL) * math.Pow(2, float64(system.poll)*damping))
 	if system.clock.state != SYNC {
 		dtemp = 0
+	} else if system.hold > 0 {
+		dtemp = system.clock.offset / (float64(PLL) * Log2ToDouble(1))
+		system.hold--
 	}
 
 	/*
@@ -479,14 +483,10 @@ func (system *NTPSystem) clockAdjust() {
 	 */
 	//  TODO: Might need to wrap this in system.hold == 0 ??
 	system.clock.offset -= dtemp
+	debug("*****ADJUSTING:")
+	debug("SYS OFFSET:", system.offset, "CLOCK OFFSET:", system.clock.offset)
+	debug("FREQ: ", system.clock.freq*1e6, "OFFSET (dtemp):", dtemp*1e6)
 	adjustTime(system.clock.freq + dtemp)
-
-	// Use last here since offset is set to 0 upon a STEP
-	if system.clock.offset < STARTUP_OFFSET_MAX && system.clock.offset != 0 {
-		system.hold = 0
-	} else if system.hold > 0 {
-		system.hold--
-	}
 
 	// info("Adjusting:", system.clock.freq+dtemp, dtemp)
 
@@ -860,7 +860,6 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		return
 	}
 
-	debug(system.clock.t, offset)
 	system.clockFilter(association, offset, delay, disp)
 }
 
@@ -1603,14 +1602,6 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			system.rstclock(FREQ, association.t, 0)
 			return LSTEP
 
-			/*
-			* In S_FSET state, this is the first update and the
-			* frequency has been initialized.  Adjust the phase,
-			* but don't adjust the frequency until the next update.
-			 */
-		case FSET:
-			system.hold = WATCH
-
 		/*
 		 * In S_FREQ state, ignore updates until the stepout
 		 * threshold.  After that, correct the phase and
@@ -1623,6 +1614,8 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 
 			system.hold = WATCH
 			freq = (offset - system.clock.offset) / mu
+
+			fallthrough
 
 		/*
 		 * We get here by default in S_SYNC and S_SPIK states.
@@ -1639,35 +1632,28 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			 * loop gain increases in steps to 1 / AVG.
 			 */
 			//  TODO: re-add this?
-			// if Log2ToDouble(system.poll) > ALLAN/2 {
-			// 	etemp = float64(FLL - system.poll)
-			// 	if etemp < AVG {
-			// 		etemp = AVG
-			// 	}
-			// 	freq += offset / (math.Max(mu,
-			// 		ALLAN) * etemp)
-			// }
-			/*
-			 * For the PLL the integration interval
-			 * (numerator) is the minimum of the update
-			 * interval and poll interval.  This allows
-			 * oversampling, but not undersampling.
-			 */
+			if system.hold == 0 {
+				if Log2ToDouble(system.poll) > ALLAN {
+					freq += (offset - system.clock.offset) / (FLL * math.Max(mu, float64(system.poll)))
 
-			//  PLL
-			etemp = math.Min(mu, Log2ToDouble(system.poll))
-			dtemp = 4 * PLL * Log2ToDouble(system.poll)
-			freq += offset * etemp / (dtemp * dtemp)
-			info("FREQ update (PLL):", freq)
+					info("FREQ update (FLL):", freq)
+				}
+				/*
+				 * For the PLL the integration interval
+				 * (numerator) is the minimum of the update
+				 * interval and poll interval.  This allows
+				 * oversampling, but not undersampling.
+				 */
 
-			// FLL
-			freq += (offset - system.clock.offset) / (FLL * math.Max(mu, ALLAN))
+				//  PLL
+				etemp = math.Min(mu, ALLAN)
+				dtemp = 4 * PLL * Log2ToDouble(system.poll)
+				freq += offset * etemp / (dtemp * dtemp)
+				info("FREQ update (PLL):", offset*etemp/(dtemp*dtemp))
+			}
 
-			info("FREQ update (FLL):", freq-(offset*etemp/(dtemp*dtemp)))
-
-			if system.clock.state == SYNC && system.hold > 0 {
-				system.rstclock(SYNC, association.t, offset)
-				return SLEW
+			if math.Abs(offset) < STARTUP_OFFSET_MAX {
+				system.hold = 0
 			}
 		}
 		system.rstclock(SYNC, association.t, offset)
@@ -1695,6 +1681,11 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	 * helps calm the dance.  Works best using burst mode.
 	 */
 	// fmt.Println("CLOCK OFFSET:", system.clock.offset, "PGATE*system.clock.jitter:", PGATE*system.clock.jitter)
+	if system.hold > 0 {
+		system.clock.count = 0
+		return rval
+	}
+
 	if math.Abs(system.clock.offset) < PGATE*system.clock.jitter {
 		info("Incrementing clock count based on offset and jitter")
 		system.clock.count += int32(system.poll)

@@ -6,7 +6,7 @@ import (
 )
 
 func shouldSetTime() bool {
-	return os.Getenv("SET_TIME") == "1"
+	return os.Getenv("ENABLED") == "1"
 }
 
 func info(args ...any) {
