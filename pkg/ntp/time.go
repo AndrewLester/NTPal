@@ -43,10 +43,10 @@ func adjustTime(offset float64) {
 
 	Sec := int64(ntpTime>>32) * int64(sign)
 	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
-		32)) / float64(eraLength) * 1e6))
+		32))/float64(eraLength)*1e6)) * int32(sign)
 
-	if sign < 0 && Sec == 0 {
-		Sec = -1
+	for Usec < 0 {
+		Sec -= 1
 		Usec += 1e6
 	}
 

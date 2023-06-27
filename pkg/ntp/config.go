@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+type NTPConfig struct {
+	driftfile string
+}
+
 type ServerAssociationConfig struct {
 	address *net.UDPAddr
 	burst   bool
@@ -25,12 +29,14 @@ type ServerAssociationConfig struct {
 const DEFAULT_MINPOLL = 6
 const DEFAULT_MAXPOLL = 10
 
-func ParseConfig(path string) []ServerAssociationConfig {
+func ParseConfig(path string) (NTPConfig, []ServerAssociationConfig) {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("File at", path, "could not be read for configuration:", err)
 	}
 	defer file.Close()
+
+	config := NTPConfig{}
 
 	serverAssociations := []ServerAssociationConfig{}
 
@@ -91,6 +97,12 @@ func ParseConfig(path string) []ServerAssociationConfig {
 				hmode:   CLIENT,
 			}
 			serverAssociations = append(serverAssociations, serverAssociation)
+		case "driftfile":
+			if len(arguments) < 2 {
+				configParseError("Missing required argument \"path\"")
+			}
+
+			config.driftfile = arguments[1]
 		case "#":
 			// Comment
 		default:
@@ -103,7 +115,7 @@ func ParseConfig(path string) []ServerAssociationConfig {
 		log.Fatal(err)
 	}
 
-	return serverAssociations
+	return config, serverAssociations
 }
 
 func optionalArgument(name string, arguments *[]string) bool {

@@ -50,7 +50,7 @@ const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
 const FLL = 8          /* FLL loop gain */
 const AVG = 4          /* parameter averaging constant */
-const ALLAN = 1500     /* compromise Allan intercept (s) */
+const ALLAN = 1024     /* compromise Allan intercept (s) */
 const LIMIT = 30       /* poll-adjust threshold */
 const MAXFREQ = 500e-6 /* frequency tolerance (500 ppm) */
 const PGATE = 4        /* poll-adjust gate */
@@ -329,7 +329,16 @@ func NewNTPSystem(host, port, config, drift string) *NTPSystem {
 }
 
 func (system *NTPSystem) Start() {
-	file, err := os.Open(system.drift)
+	config, associationConfigs := ParseConfig(system.config)
+
+	driftfile := config.driftfile
+	if system.drift != "" {
+		driftfile = system.drift
+	} else {
+		system.drift = driftfile
+	}
+
+	file, err := os.Open(driftfile)
 	if err == nil {
 		reader := bufio.NewReader(file)
 		text, _ := reader.ReadString('\n') // No new line in the file, read until end
@@ -355,7 +364,6 @@ func (system *NTPSystem) Start() {
 	}
 	system.address = address
 
-	associationConfigs := ParseConfig(system.config)
 	system.setupAssociations(associationConfigs)
 
 	if system.mode == SERVER {
@@ -425,7 +433,7 @@ func (system *NTPSystem) setupServer() {
 			log.Printf("Error reading packet: %v", err)
 		}
 		recvPacket.dst = GetSystemTime()
-		reply := system.Receive(*recvPacket)
+		reply := system.receive(*recvPacket)
 		if reply == nil {
 			continue
 		}
@@ -461,18 +469,22 @@ func (system *NTPSystem) clockAdjust() {
 		damping = 1.2
 	}
 	dtemp := system.clock.offset / (float64(PLL) * math.Pow(2, float64(system.poll)*damping))
+	if system.clock.state != SYNC {
+		dtemp = 0
+	}
 
 	/*
 	* This is the kernel adjust time function, usually implemented
 	* by the Unix adjtime() system call.
 	 */
+	//  TODO: Might need to wrap this in system.hold == 0 ??
 	system.clock.offset -= dtemp
 	adjustTime(system.clock.freq + dtemp)
 
 	// Use last here since offset is set to 0 upon a STEP
 	if system.clock.offset < STARTUP_OFFSET_MAX && system.clock.offset != 0 {
 		system.hold = 0
-	} else {
+	} else if system.hold > 0 {
 		system.hold--
 	}
 
@@ -609,8 +621,7 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		 * the next poll a packet will arrive and set the
 		 * rightmost bit.
 		 */
-		// TODO: Not sure what oreach is for
-		// oreach := association.reach
+
 		association.outdate = int32(system.clock.t)
 		association.reach = association.reach << 1
 
@@ -666,7 +677,7 @@ func (system *NTPSystem) sendPoll(association *Association) {
 	system.pollUpdate(association, hpoll)
 }
 
-func (system *NTPSystem) Receive(packet ReceivePacket) *TransmitPacket {
+func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 	if packet.version > VERSION {
 		return nil
 	}
@@ -1647,11 +1658,12 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			etemp = math.Min(mu, Log2ToDouble(system.poll))
 			dtemp = 4 * PLL * Log2ToDouble(system.poll)
 			freq += offset * etemp / (dtemp * dtemp)
+			info("FREQ update (PLL):", freq)
 
 			// FLL
 			freq += (offset - system.clock.offset) / (FLL * math.Max(mu, ALLAN))
 
-			info("FREQ update:", freq)
+			info("FREQ update (FLL):", freq-(offset*etemp/(dtemp*dtemp)))
 
 			if system.clock.state == SYNC && system.hold > 0 {
 				system.rstclock(SYNC, association.t, offset)
@@ -1668,7 +1680,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	 * along with the jitter, be a highly useful monitoring and
 	 * debugging tool.
 	 */
-	// freq += system.clock.freq
+	freq += system.clock.freq
 	system.clock.freq = math.Max(math.Min(MAXFREQ, freq), -MAXFREQ)
 	info("Set FREQ to:", system.clock.freq)
 	etemp = math.Pow(system.clock.wander, 2)
@@ -1715,7 +1727,6 @@ func (system *NTPSystem) rstclock(state int, t, offset float64) {
 	system.clock.state = state
 	system.clock.last = system.clock.offset
 	system.clock.offset = offset
-	// TODO: Look out for this castV
 	system.t = uint64(t)
 }
 
