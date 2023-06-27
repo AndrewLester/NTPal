@@ -52,16 +52,20 @@
             };
 
             async function synchronize() {
-                const offsets = [];
-                for (let i = 0; i < 4; i++) {
-                    offsets.push(await syncRequest());
+                const peers = [];
+                for (let i = 0; i < 1; i++) {
+                    peers.push(await syncRequest());
                     await sleep(250);
                 }
 
-                const offset =
-                    offsets.reduce((prev, cur) => prev + cur, 0) /
-                    offsets.length;
+                let minDelayPeer = peers[0];
+                for (const peer of peers) {
+                    if (peer.delay < minDelayPeer.delay) {
+                        minDelayPeer = peer;
+                    }
+                }
 
+                const { offset } = minDelayPeer;
                 const offsetMessage = offset < 0 ? 'ahead' : 'behind';
                 elems.offset.textContent = `${offsetMessage} by ${Math.abs(
                     offset
@@ -83,45 +87,66 @@
                     }),
                     headers: { 'content-type': 'application/json' },
                 }).then((res) => res.json());
-                synchronizeRes.Dst = getSystemTime();
+                synchronizeRes.Dst = getSystemTime(true);
                 synchronizeRes.Orig = BigInt(synchronizeRes.Orig);
                 synchronizeRes.Recv = BigInt(synchronizeRes.Recv);
-                console.log(synchronizeRes.Xmt, BigInt(synchronizeRes.Xmt));
                 synchronizeRes.Xmt = BigInt(synchronizeRes.Xmt);
 
                 console.log(
                     synchronizeRes.Recv,
                     synchronizeRes.Orig,
                     synchronizeRes.Xmt,
-                    synchronizeRes.Dst
+                    synchronizeRes.Dst,
+                    '****',
+                    ntpTimestampToDouble(
+                        synchronizeRes.Recv - synchronizeRes.Orig
+                    ),
+                    ntpTimestampToDouble(
+                        synchronizeRes.Xmt - synchronizeRes.Dst
+                    )
                 );
 
-                return Number(
-                    (ntpTimestampToDouble(
-                        synchronizeRes.Recv - synchronizeRes.Orig
-                    ) +
+                return {
+                    offset:
+                        (ntpTimestampToDouble(
+                            synchronizeRes.Recv - synchronizeRes.Orig
+                        ) +
+                            ntpTimestampToDouble(
+                                synchronizeRes.Xmt - synchronizeRes.Dst
+                            )) /
+                        2,
+                    delay:
                         ntpTimestampToDouble(
-                            synchronizeRes.Xmt - synchronizeRes.Dst
-                        )) /
-                        2
-                );
+                            synchronizeRes.Dst - synchronizeRes.Orig
+                        ) -
+                        ntpTimestampToDouble(
+                            synchronizeRes.Xmt - synchronizeRes.Recv
+                        ),
+                };
             }
 
             const eraLength = 4_294_967_296n; // 2^32
             const unixEraOffset = 2_208_988_800; // 1970 - 1900 in seconds
 
-            function getSystemTime() {
-                const now = Date.now();
+            let start;
+            function getSystemTime(addLast = false) {
+                let now = Date.now();
+                if (!addLast) {
+                    start = performance.now();
+                } else {
+                    const diff = performance.now() - start;
+                    now += diff;
+                }
                 const seconds = Math.trunc(now / 1e3);
-                const millis = now % 1e3;
+                const micros = (now * 1e3) % 1e6;
                 return (
                     BigInt(seconds + unixEraOffset) * eraLength +
-                    BigInt(Math.trunc(millis / 1e3)) * eraLength
+                    (BigInt(micros) * eraLength) / BigInt(1e6)
                 );
             }
 
-            // We only know MS from Date.now()
-            const decimalFactor = Math.pow(10, 3);
+            // We only know us from Date.now() + performance.now()
+            const decimalFactor = Math.pow(10, 6);
             function ntpTimestampToDouble(ntpTimestamp) {
                 return (
                     Number((ntpTimestamp * BigInt(decimalFactor)) / eraLength) /

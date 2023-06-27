@@ -980,9 +980,9 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 			association.nextdate += BTIME
 		}
 	} else {
-		info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
+		info("Next date based on poll:", 1<<int32(math.Max(math.Max(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))), association.Poll, association.hpoll)
-		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
+		association.nextdate = association.outdate + (1 << int32(math.Max(math.Max(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))))
 	}
 
@@ -1661,7 +1661,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			info("FREQ update (PLL):", freq)
 
 			// FLL
-			freq += (offset - system.clock.offset) / (FLL * math.Max(mu, ALLAN))
+			freq += (offset - system.clock.last) / (FLL * math.Max(mu, ALLAN))
 
 			info("FREQ update (FLL):", freq-(offset*etemp/(dtemp*dtemp)))
 
