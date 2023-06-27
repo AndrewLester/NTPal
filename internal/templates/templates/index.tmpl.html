@@ -52,21 +52,21 @@
             };
 
             async function synchronize() {
-                const peers = [];
+                const attempts = [];
                 for (let i = 0; i < 1; i++) {
-                    peers.push(await syncRequest());
+                    attempts.push(await syncRequest());
                     await sleep(250);
                 }
 
-                let minDelayPeer = peers[0];
-                for (const peer of peers) {
-                    if (peer.delay < minDelayPeer.delay) {
-                        minDelayPeer = peer;
+                let minDelayAttempt = attempts[0];
+                for (const attempt of attempts) {
+                    if (attempt.delay < minDelayAttempt.delay) {
+                        minDelayAttempt = attempt;
                     }
                 }
 
-                const { offset } = minDelayPeer;
-                const offsetMessage = offset < 0 ? 'ahead' : 'behind';
+                const { offset } = minDelayAttempt;
+                const offsetMessage = offset < 0 ? 'behind' : 'ahead';
                 elems.offset.textContent = `${offsetMessage} by ${Math.abs(
                     offset
                 ).toFixed(3)} seconds`;
@@ -91,20 +91,6 @@
                 synchronizeRes.Orig = BigInt(synchronizeRes.Orig);
                 synchronizeRes.Recv = BigInt(synchronizeRes.Recv);
                 synchronizeRes.Xmt = BigInt(synchronizeRes.Xmt);
-
-                console.log(
-                    synchronizeRes.Recv,
-                    synchronizeRes.Orig,
-                    synchronizeRes.Xmt,
-                    synchronizeRes.Dst,
-                    '****',
-                    ntpTimestampToDouble(
-                        synchronizeRes.Recv - synchronizeRes.Orig
-                    ),
-                    ntpTimestampToDouble(
-                        synchronizeRes.Xmt - synchronizeRes.Dst
-                    )
-                );
 
                 return {
                     offset:

@@ -1661,7 +1661,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			info("FREQ update (PLL):", freq)
 
 			// FLL
-			freq += (offset - system.clock.last) / (FLL * math.Max(mu, ALLAN))
+			freq += (offset - system.clock.offset) / (FLL * math.Max(mu, ALLAN))
 
 			info("FREQ update (FLL):", freq-(offset*etemp/(dtemp*dtemp)))
 
