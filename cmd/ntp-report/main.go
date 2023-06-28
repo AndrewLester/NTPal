@@ -37,15 +37,12 @@ func main() {
 			"Region": os.Getenv("FLY_REGION"),
 			"Time":   nowTime.Format(time.RFC3339),
 		}
-		// time, err := ntp.Time("0.pool.ntp.org")
-		// if err != nil {
-		// 	fmt.Fprintf(os.Stderr, "Error querying time %v", err)
-		// 	templates.TemplateExecutor.ExecuteTemplate(w, "error.html.tmpl", data)
-		// 	return
-		// }
-		// fmt.Printf("CF time: %v\n", time)
 
-		// fmt.Printf("Our time: %v\n", time.Local())
+		// Set these headers to bump performance.now() precision to 5 microseconds
+		headerMap := w.Header()
+		headerMap.Add("Cross-Origin-Opener-Policy", "same-origin")
+		headerMap.Add("Cross-Origin-Embedder-Policy", "require-corp")
+		w.WriteHeader(200)
 
 		templates.TemplateExecutor.ExecuteTemplate(w, "index.tmpl.html", data)
 	})
@@ -62,10 +59,13 @@ func main() {
 		syncResponse := SyncResponse{
 			Orig: syncRequest.Orig,
 			Recv: recv,
-			Xmt:  strconv.FormatUint(ntp.GetSystemTime(), 10),
+			Xmt:  "",
 		}
 
-		json.NewEncoder(w).Encode(syncResponse)
+		encoder := json.NewEncoder(w)
+
+		syncResponse.Xmt = strconv.FormatUint(ntp.GetSystemTime(), 10)
+		encoder.Encode(syncResponse)
 	})
 
 	log.Println("listening on", port)

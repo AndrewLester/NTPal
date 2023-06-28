@@ -266,9 +266,10 @@
 
             async function synchronize() {
                 const attempts = [];
-                for (let i = 0; i < 1; i++) {
+                for (let i = 0; i < 5; i++) {
                     attempts.push(await syncRequest());
-                    await sleep(250);
+                    console.log(attempts[i].delay);
+                    // await sleep(1000);
                 }
 
                 let minDelayAttempt = attempts[0];
@@ -339,7 +340,9 @@
                 if (!addLast) {
                     start = performance.now();
                 } else {
-                    const diff = performance.now() - start;
+                    // Only add microsecond diff to now, since milli is covered by Date.now()
+                    const diff =
+                        (((performance.now() - start) * 1e3) % 1e3) / 1e3;
                     now += diff;
                 }
                 const seconds = Math.trunc(now / 1e3);
