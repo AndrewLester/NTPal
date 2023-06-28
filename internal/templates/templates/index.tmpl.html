@@ -268,8 +268,6 @@
                 const attempts = [];
                 for (let i = 0; i < 5; i++) {
                     attempts.push(await syncRequest());
-                    console.log(attempts[i].delay);
-                    // await sleep(1000);
                 }
 
                 let minDelayAttempt = attempts[0];
