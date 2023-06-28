@@ -10,20 +10,15 @@ import (
 )
 
 func stepTime(offset float64) {
-	var unixTime unix.Timeval
-	unix.Gettimeofday(&unixTime)
-	old := unixTime
-
-	ntpTime := DoubleToNTPTimestampEncoded(offset) + UnixToNTPTimestampEncoded(unixTime)
+	systemTime := GetSystemTime()
+	ntpTime := DoubleToNTPTimestampEncoded(offset) + systemTime
 
 	Sec := int64(ntpTime >> 32)
 	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
 		32)) / float64(eraLength) * 1e6))
 	Sec -= unixEraOffset
 
-	var now unix.Timeval
-	unix.Gettimeofday(&now)
-	info("CURRENT:", UnixToTime(old), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
+	info("CURRENT:", NTPTimestampToTime(systemTime), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
 	if shouldSetTime() {
 		err := settimeofday.Settimeofday(Sec, Usec)
 		if err != nil {
@@ -64,9 +59,9 @@ func UnixToTime(t unix.Timeval) time.Time {
 	return time.Unix(t.Unix())
 }
 
-func UnixToNTPTimestampEncoded(time unix.Timeval) NTPTimestampEncoded {
+func UnixToNTPTimestampEncoded(time unix.Timespec) NTPTimestampEncoded {
 	return uint64((time.Sec+unixEraOffset)<<32) +
-		uint64(float64(time.Usec)/1e6*float64(eraLength))
+		uint64(float64(time.Nsec)/1e9*float64(eraLength))
 }
 
 func DoubleToNTPTimestampEncoded(offset float64) NTPTimestampEncoded {

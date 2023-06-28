@@ -50,7 +50,7 @@ const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
 const FLL = 4          /* FLL loop gain */
 const AVG = 4          /* parameter averaging constant */
-const ALLAN = 1024     /* compromise Allan intercept (s) */
+const ALLAN = 2048     /* compromise Allan intercept (s) */
 const LIMIT = 30       /* poll-adjust threshold */
 const MAXFREQ = 500e-6 /* frequency tolerance (500 ppm) */
 const PGATE = 4        /* poll-adjust gate */
@@ -929,8 +929,8 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = association.Org
 	transmitPacket.Rec = association.Rec
-	transmitPacket.Xmt = GetSystemTime()
-	association.Xmt = transmitPacket.Xmt
+
+	// Xmt set lower down
 
 	/*
 	 * If the key ID is nonzero, send a valid MAC using the key ID
@@ -957,6 +957,9 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		firstByte |= byte(transmitPacket.mode)
 
 		writer.WriteByte(firstByte)
+
+		transmitPacket.Xmt = GetSystemTime()
+		association.Xmt = transmitPacket.Xmt
 		if err := binary.Write(writer, binary.BigEndian, transmitPacket.NTPFieldsEncoded); err != nil {
 			panic("encoded transmit packet err")
 		}
@@ -1380,6 +1383,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 	 */
 	//   TODO: Above^
 	case PANIC:
+		debug("Offset:", system.offset)
 		log.Fatal("Offset too large!")
 
 	/*

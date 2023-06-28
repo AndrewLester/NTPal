@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/AndrewLester/ntp/internal/templates"
 	"github.com/AndrewLester/ntp/pkg/ntp"
+	"golang.org/x/sys/unix"
 )
 
 type SyncRequest struct {
@@ -28,8 +28,8 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		var now syscall.Timeval
-		syscall.Gettimeofday(&now)
+		var now unix.Timespec
+		unix.ClockGettime(unix.CLOCK_MONOTONIC, &now)
 
 		nowTime := time.Unix(now.Unix())
 
@@ -59,11 +59,10 @@ func main() {
 		}
 		recv := strconv.FormatUint(ntp.GetSystemTime(), 10)
 
-		xmt := ntp.GetSystemTime()
 		syncResponse := SyncResponse{
 			Orig: syncRequest.Orig,
 			Recv: recv,
-			Xmt:  strconv.FormatUint(xmt, 10),
+			Xmt:  strconv.FormatUint(ntp.GetSystemTime(), 10),
 		}
 
 		json.NewEncoder(w).Encode(syncResponse)
