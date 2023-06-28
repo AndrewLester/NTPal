@@ -154,6 +154,11 @@
                 font-style: normal;
             }
 
+            .region {
+                font-style: italic;
+                margin-top: 10px;
+            }
+
             @media (max-width: 500px) {
                 h1,
                 h2 {
@@ -162,6 +167,12 @@
 
                 h1 {
                     font-size: 2.5rem;
+                }
+            }
+
+            @media (prefers-color-scheme: dark) and (max-width: 500px) {
+                h1 a:last-child {
+                    color: var(--resume-teal);
                 }
             }
         </style>
@@ -241,8 +252,9 @@
                 Your device's time is <span id="offset">synchronizing...</span>
             </p>
         </div>
+
         {{ if .Region }}
-        <p>Server running in the {{.Region}} region</p>
+        <p class="region">Server running in the {{.Region}} region</p>
         {{ end }}
 
         <script>
@@ -267,7 +279,7 @@
                 }
 
                 const { offset } = minDelayAttempt;
-                const offsetMessage = offset < 0 ? 'behind' : 'ahead';
+                const offsetMessage = offset < 0 ? 'ahead' : 'behind';
                 elems.offset.textContent = `${offsetMessage} by ${Math.abs(
                     offset
                 ).toFixed(3)} seconds`;
