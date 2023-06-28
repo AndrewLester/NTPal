@@ -171,6 +171,11 @@ type NTPSystem struct {
 	wg   sync.WaitGroup
 
 	hold int64
+
+	// QUERY
+
+	query    bool
+	filtered chan any
 }
 
 type Association struct {
@@ -326,7 +331,55 @@ func NewNTPSystem(host, port, config, drift string) *NTPSystem {
 		poll:      MINPOLL,
 		precision: PRECISION,
 		hold:      WATCH,
+		filtered:  make(chan any, 4),
 	}
+}
+
+func (system *NTPSystem) Query(address string) (float64, float64) {
+	system.query = true
+
+	rand.Seed(time.Now().UnixNano())
+
+	hostAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(system.host, system.port))
+	if err != nil {
+		log.Fatal("Could not resolve NTP_HOST + NTP_PORT")
+	}
+	system.address = hostAddr
+
+	addr, err := net.ResolveUDPAddr("udp", address+":123")
+	if err != nil {
+		log.Fatal("Invalid address: ", address)
+	}
+	association := &Association{
+		hmode: CLIENT,
+		hpoll: MINPOLL,
+		ReceivePacket: ReceivePacket{
+			srcaddr: addr,
+			dstaddr: system.address,
+			version: VERSION,
+			keyid:   0,
+		},
+	}
+	system.clear(association, INIT)
+	system.associations = append(system.associations, association)
+
+	system.listen()
+
+	go system.setupServer()
+
+	for i := 0; i < 4; i++ {
+		system.pollPeer(association)
+		<-system.filtered
+	}
+
+	minDelayStage := association.f[0]
+	for _, stage := range association.f {
+		if stage.delay < minDelayStage.delay {
+			minDelayStage = stage
+		}
+	}
+
+	return minDelayStage.offset, minDelayStage.delay
 }
 
 func (system *NTPSystem) Start() {
@@ -368,14 +421,8 @@ func (system *NTPSystem) Start() {
 	system.setupAssociations(associationConfigs)
 
 	if system.mode == SERVER {
-		system.wg.Add(1)
+		system.listen()
 
-		udp, err := net.ListenUDP("udp", system.address)
-		if err != nil {
-			log.Fatalf("can't listen on %v/udp: %s", system.address, err)
-		}
-
-		system.conn = udp
 		system.wg.Add(1)
 		go system.setupServer()
 	}
@@ -411,6 +458,15 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 			time.Sleep(time.Second)
 		}
 	}()
+}
+
+func (system *NTPSystem) listen() {
+	udp, err := net.ListenUDP("udp", system.address)
+	if err != nil {
+		log.Fatalf("can't listen on %v/udp: %s", system.address, err)
+	}
+
+	system.conn = udp
 }
 
 func (system *NTPSystem) setupServer() {
@@ -812,6 +868,9 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 
 	// Server must be synchronized with valid stratum
 	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
+		if system.query {
+			log.Fatal("Server is not synchronized.")
+		}
 		return
 	}
 
@@ -840,18 +899,18 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	 * the delay is clamped not less than the system precision.
 	 */
 	if association.mode == BROADCAST_SERVER {
-		offset = NTPTimestampDifferenceToDouble(float64(packet.Xmt) - float64(packet.dst))
+		offset = NTPTimestampDifferenceToDouble(int64(packet.Xmt - packet.dst))
 		delay = BDELAY
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			2*BDELAY
 	} else {
-		offset = (NTPTimestampDifferenceToDouble(float64(packet.Rec)-float64(packet.Org)) + NTPTimestampDifferenceToDouble(float64(packet.Xmt)-
-			float64(packet.dst))) / 2
-		delay = math.Max(NTPTimestampDifferenceToDouble(float64(packet.dst)-float64(packet.Org))-NTPTimestampDifferenceToDouble(float64(packet.Xmt)-
-			float64(packet.Rec)), Log2ToDouble(system.precision))
+		offset = (NTPTimestampDifferenceToDouble(int64(packet.Rec-packet.Org)) + NTPTimestampDifferenceToDouble(int64(packet.Xmt-
+			packet.dst))) / 2
+		delay = math.Max(NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))-NTPTimestampDifferenceToDouble(int64(packet.Xmt-
+			packet.Rec)), Log2ToDouble(system.precision))
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
-			NTPTimestampDifferenceToDouble(float64(packet.dst)-float64(packet.Org))
-		info("SAMPLE: offset:", offset, "delay:", delay, "disp:", disp, "packet prec:", Log2ToDouble(packet.Precision)+Log2ToDouble(system.precision), PHI*NTPTimestampDifferenceToDouble(float64(packet.dst)-float64(packet.Org)))
+			NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))
+		info("SAMPLE: offset:", offset, "delay:", delay, "disp:", disp)
 	}
 
 	// Don't use this offset/delay if KoD, probably invalid
@@ -982,9 +1041,9 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 			association.nextdate += BTIME
 		}
 	} else {
-		info("Next date based on poll:", 1<<int32(math.Max(math.Max(float64(association.Poll),
+		info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))), association.Poll, association.hpoll)
-		association.nextdate = association.outdate + (1 << int32(math.Max(math.Max(float64(association.Poll),
+		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))))
 	}
 
@@ -1100,6 +1159,10 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	if m == 0 {
 		system.clockSelect()
 		return
+	}
+
+	if system.query {
+		system.filtered <- 0
 	}
 
 	etemp := math.Abs(association.offset - f[0].offset)

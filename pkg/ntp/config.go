@@ -103,8 +103,8 @@ func ParseConfig(path string) (NTPConfig, []ServerAssociationConfig) {
 			}
 
 			config.driftfile = arguments[1]
-		case "#":
-			// Comment
+		case "#", " ", "":
+			// Comment/empty
 		default:
 			configParseError("Invalid command: ", arguments[0])
 		}

@@ -72,8 +72,8 @@ func NTPTimestampEncodedToDouble(ntpTimestamp NTPTimestampEncoded) float64 {
 	return float64(ntpTimestamp) / float64(eraLength)
 }
 
-func NTPTimestampDifferenceToDouble(difference float64) float64 {
-	return difference / float64(eraLength)
+func NTPTimestampDifferenceToDouble(difference int64) float64 {
+	return float64(difference) / float64(eraLength)
 }
 
 func Log2ToDouble(a int8) float64 {
