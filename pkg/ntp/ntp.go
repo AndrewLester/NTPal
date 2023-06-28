@@ -369,7 +369,11 @@ func (system *NTPSystem) Query(address string) (float64, float64) {
 
 	for i := 0; i < 4; i++ {
 		system.pollPeer(association)
-		<-system.filtered
+		select {
+		case <-system.filtered:
+		case <-time.After(time.Duration(5) * time.Second):
+			fmt.Println("Request timed out.")
+		}
 	}
 
 	minDelayStage := association.f[0]
@@ -1534,7 +1538,6 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	system.clock.lock.Lock()
 	defer system.clock.lock.Unlock()
 
-	var state int
 	var freq, mu float64
 	var rval LocalClockReturnCode
 	var etemp, dtemp float64
@@ -1564,7 +1567,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		 * switch to S_SPIK state.
 		 */
 		case SYNC:
-			state = SPIK
+			system.clock.state = SPIK
 			return rval
 
 		/*
@@ -1630,11 +1633,11 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			system.poll = MINPOLL
 			rval = LSTEP
 			// Initialize hold timer for training and startup intervals
-			if state == NSET || state == FSET {
+			if system.clock.state == NSET || system.clock.state == FSET {
 				system.hold = WATCH
 			}
 
-			if state == NSET {
+			if system.clock.state == NSET {
 				system.rstclock(FREQ, association.t, 0)
 				return rval
 			}
