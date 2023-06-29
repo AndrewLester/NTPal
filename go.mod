@@ -7,7 +7,10 @@ require (
 	golang.org/x/sys v0.9.0
 )
 
-require github.com/charmbracelet/lipgloss v0.7.1 // indirect
+require (
+	github.com/charmbracelet/harmonica v0.2.0 // indirect
+	github.com/charmbracelet/lipgloss v0.7.1 // indirect
+)
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -174,8 +174,9 @@ type NTPSystem struct {
 
 	// QUERY
 
-	query    bool
-	filtered chan any
+	query            bool
+	filtered         chan any
+	ProgressFiltered chan any
 }
 
 type Association struct {
@@ -322,16 +323,17 @@ type TransmitPacket struct {
 
 func NewNTPSystem(host, port, config, drift string) *NTPSystem {
 	return &NTPSystem{
-		host:      host,
-		port:      port,
-		config:    config,
-		drift:     drift,
-		mode:      SERVER,
-		leap:      NOSYNC,
-		poll:      MINPOLL,
-		precision: PRECISION,
-		hold:      WATCH,
-		filtered:  make(chan any, 4),
+		host:             host,
+		port:             port,
+		config:           config,
+		drift:            drift,
+		mode:             SERVER,
+		leap:             NOSYNC,
+		poll:             MINPOLL,
+		precision:        PRECISION,
+		hold:             WATCH,
+		filtered:         make(chan any),
+		ProgressFiltered: make(chan any),
 	}
 }
 
@@ -371,8 +373,9 @@ func (system *NTPSystem) Query(address string) (float64, float64) {
 		system.pollPeer(association)
 		select {
 		case <-system.filtered:
-		case <-time.After(time.Duration(5) * time.Second):
-			fmt.Println("Request timed out.")
+			system.ProgressFiltered <- 0
+		case <-time.After(time.Duration(1) * time.Second):
+			system.ProgressFiltered <- 0
 		}
 	}
 
