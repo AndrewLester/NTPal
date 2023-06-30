@@ -2,9 +2,9 @@
 
 NTPal is an in-development, incomplete, and rough around the edges implementation of an NTP client/server process. It also supports NTP symmetric mode, like any good friend would.
 
-## [time.andrewlester.net](time.andrewlester.net)
+## [time.andrewlester.net](https://time.andrewlester.net)
 
-[time.andrewlester.net](time.andrewlester.net) is the canonical server running NTPal for anyone to synchronize with. It does not support symmetric synchronization.
+[time.andrewlester.net](https://time.andrewlester.net) is the canonical server running NTPal for anyone to synchronize with. It does not support symmetric synchronization.
 
 The server is hosted on [fly.io](https://fly.io/) with a configuration outlined in the [fly.toml](https://github.com/AndrewLester/ntpal/blob/main/fly.toml). Deployment is as simple as running `fly deploy`.
 
