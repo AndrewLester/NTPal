@@ -1,2 +1,2 @@
-web: /app/bin/ntp-report
-ntp: /app/bin/ntp --config ntp.conf --drift /data/ntp.drift
+web: /app/bin/ntpal-report
+ntp: /app/bin/ntpal --config ntp.conf --drift /data/ntp.drift

@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -337,7 +336,7 @@ func NewNTPSystem(host, port, config, drift string) *NTPSystem {
 	}
 }
 
-func (system *NTPSystem) Query(address string) (float64, float64) {
+func (system *NTPSystem) Query(address string, messages int) (float64, float64) {
 	system.query = true
 
 	rand.Seed(time.Now().UnixNano())
@@ -366,10 +365,9 @@ func (system *NTPSystem) Query(address string) (float64, float64) {
 	system.associations = append(system.associations, association)
 
 	system.listen()
-
 	go system.setupServer()
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < messages; i++ {
 		system.pollPeer(association)
 		select {
 		case <-system.filtered:
@@ -386,35 +384,24 @@ func (system *NTPSystem) Query(address string) (float64, float64) {
 		}
 	}
 
-	return minDelayStage.offset, minDelayStage.delay
+	return minDelayStage.offset, system.rootDist(association)
 }
 
 func (system *NTPSystem) Start() {
-	config, associationConfigs := ParseConfig(system.config)
+	config := ParseConfig(system.config)
 
-	driftfile := config.driftfile
-	if system.drift != "" {
-		driftfile = system.drift
-	} else {
-		system.drift = driftfile
+	if system.drift == "" {
+		system.drift = config.driftfile
 	}
 
-	file, err := os.Open(driftfile)
-	if err == nil {
-		reader := bufio.NewReader(file)
-		text, _ := reader.ReadString('\n') // No new line in the file, read until end
-
-		freq, err := strconv.ParseFloat(text, 64)
-		if err != nil {
-			log.Fatal("NTP drift file invalid. Delete:", system.drift)
-		}
-
+	freq, serverPollIntervals := readDriftInfo(system)
+	if freq != 0 {
 		system.clock.freq = freq
 		system.rstclock(FSET, 0, 0)
-		file.Close()
 	} else {
 		system.rstclock(NSET, 0, 0)
 	}
+
 	system.clock.jitter = Log2ToDouble(system.precision)
 
 	rand.Seed(time.Now().UnixNano())
@@ -425,7 +412,7 @@ func (system *NTPSystem) Start() {
 	}
 	system.address = address
 
-	system.setupAssociations(associationConfigs)
+	system.setupAssociations(config.servers, serverPollIntervals)
 
 	if system.mode == SERVER {
 		system.listen()
@@ -437,7 +424,7 @@ func (system *NTPSystem) Start() {
 	system.wg.Wait()
 }
 
-func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociationConfig) {
+func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociationConfig, serverPollIntervals map[string]ServerPollInterval) {
 	for _, associationConfig := range associationConfigs {
 		association := &Association{
 			hmode: associationConfig.hmode,
@@ -453,6 +440,10 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 
 		association.burstEnabled = associationConfig.burst
 		association.iburstEnabled = associationConfig.iburst
+
+		if poll, ok := serverPollIntervals[associationConfig.address.IP.String()]; ok {
+			association.hpoll = poll.poll
+		}
 
 		system.associations = append(system.associations, association)
 	}
@@ -502,7 +493,8 @@ func (system *NTPSystem) setupServer() {
 			continue
 		}
 		encoded := encodeTransmitPacket(*reply)
-		system.conn.WriteTo(encoded, addr)
+		n, e := system.conn.WriteTo(encoded, addr)
+		info("(Reply) Bytes written:", n, "Err:", e)
 	}
 
 }
@@ -568,23 +560,7 @@ func (system *NTPSystem) clockAdjust() {
 
 	// Once per hour, write the clock frequency to a file.
 	if system.clock.t%3600 == 3599 {
-		freq := system.clock.freq
-		go func() {
-			file, err := os.Open(system.drift)
-			if err != nil {
-				file, err = os.Create(system.drift)
-				if err != nil {
-					log.Fatal("Could not create drift file")
-				}
-			} else {
-				file.Truncate(0)
-				file.Seek(0, 0)
-			}
-			defer file.Close()
-
-			info("~~~~~RARE: Writing clock freq:", freq, strconv.FormatFloat(freq, 'E', -1, 64))
-			file.WriteString(strconv.FormatFloat(freq, 'E', -1, 64))
-		}()
+		writeDriftInfo(system)
 	}
 
 	if system.clock.t%10 == 0 {
@@ -1168,10 +1144,6 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 		return
 	}
 
-	if system.query {
-		system.filtered <- 0
-	}
-
 	etemp := math.Abs(association.offset - f[0].offset)
 	association.offset = f[0].offset
 	association.delay = f[0].delay
@@ -1179,6 +1151,10 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 		association.jitter /= float64(m - 1)
 	}
 	association.jitter = math.Max(math.Sqrt(association.jitter), Log2ToDouble(system.precision))
+
+	if system.query {
+		system.filtered <- 0
+	}
 
 	/*
 	 * Popcorn spike suppressor.  Compare the difference between the

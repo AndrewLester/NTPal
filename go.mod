@@ -1,4 +1,4 @@
-module github.com/AndrewLester/ntp
+module github.com/AndrewLester/ntpal
 
 go 1.19
 

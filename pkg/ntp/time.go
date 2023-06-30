@@ -4,8 +4,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/AndrewLester/ntp/internal/system/adjtime"
-	"github.com/AndrewLester/ntp/internal/system/settimeofday"
+	"github.com/AndrewLester/ntpal/internal/system/adjtime"
+	"github.com/AndrewLester/ntpal/internal/system/settimeofday"
 	"golang.org/x/sys/unix"
 )
 

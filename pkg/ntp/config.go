@@ -12,6 +12,7 @@ import (
 
 type NTPConfig struct {
 	driftfile string
+	servers   []ServerAssociationConfig
 }
 
 type ServerAssociationConfig struct {
@@ -29,7 +30,7 @@ type ServerAssociationConfig struct {
 const DEFAULT_MINPOLL = 6
 const DEFAULT_MAXPOLL = 10
 
-func ParseConfig(path string) (NTPConfig, []ServerAssociationConfig) {
+func ParseConfig(path string) NTPConfig {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("File at", path, "could not be read for configuration:", err)
@@ -115,7 +116,9 @@ func ParseConfig(path string) (NTPConfig, []ServerAssociationConfig) {
 		log.Fatal(err)
 	}
 
-	return config, serverAssociations
+	config.servers = serverAssociations
+
+	return config
 }
 
 func optionalArgument(name string, arguments *[]string) bool {

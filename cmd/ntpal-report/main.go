@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/AndrewLester/ntp/internal/templates"
-	"github.com/AndrewLester/ntp/pkg/ntp"
+	"github.com/AndrewLester/ntpal/internal/templates"
+	"github.com/AndrewLester/ntpal/pkg/ntp"
 	"golang.org/x/sys/unix"
 )
 

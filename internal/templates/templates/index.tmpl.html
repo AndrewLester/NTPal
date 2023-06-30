@@ -281,7 +281,7 @@
                 const offsetMessage = offset < 0 ? 'ahead' : 'behind';
                 elems.offset.textContent = `${offsetMessage} by ${Math.abs(
                     offset
-                ).toFixed(3)} seconds`;
+                ).toFixed(3)} seconds`; // We do have up to microsecond precision, but it's not great...
                 elems.offset.classList.add('done');
 
                 const serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
@@ -351,7 +351,7 @@
                 );
             }
 
-            // We only know us from Date.now() + performance.now()
+            // We only know microseconds from Date.now() + performance.now()
             const decimalFactor = Math.pow(10, 6);
             function ntpTimestampToDouble(ntpTimestamp) {
                 return (
