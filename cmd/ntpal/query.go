@@ -47,12 +47,16 @@ type progressUpdateMessage struct{}
 
 func ntpQueryCommand(system *ntp.NTPSystem, address string) tea.Cmd {
 	return func() tea.Msg {
-		offset, delay := system.Query(address, messages)
+		offset, err := system.Query(address, messages)
+		if err >= 16 {
+			return ntpQueryMessage("Server did not respond.")
+		}
+
 		offsetString := strconv.FormatFloat(offset, 'G', 5, 64)
 		if offset > 0 {
 			offsetString = "+" + offsetString
 		}
-		delayString := strconv.FormatFloat(delay, 'G', 5, 64)
+		delayString := strconv.FormatFloat(err, 'G', 5, 64)
 		addr, _ := net.ResolveIPAddr("ip", address)
 		return ntpQueryMessage(fmt.Sprint(offsetString, " +/- ", delayString, " ", address, " ", addr.String()))
 	}

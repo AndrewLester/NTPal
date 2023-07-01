@@ -1,8 +1,6 @@
 package ntp
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -44,7 +42,7 @@ const BCOUNT = 8   /* packets in a burst */
 const BTIME = 2    /* burst interval (s) */
 
 const STEPT = .128     /* step threshold (s) */
-const WATCH = 900      /* stepout threshold (s) */
+const WATCH = 300      /* stepout threshold (s) */
 const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
 const FLL = 4          /* FLL loop gain */
@@ -144,7 +142,7 @@ type NTPSystem struct {
 	precision int8                /* precision */
 	rootdelay float64             /* root delay */
 	rootdisp  float64             /* root dispersion */
-	refid     byte                /* reference ID */
+	refid     NTPShortEncoded     /* reference ID */
 	reftime   NTPTimestampEncoded /* reference time */
 	// Max of the two below is NMAX, but using slice type becaues it's not always full, and nils cant be sorted
 	m            []Chime      /* chime list */
@@ -353,7 +351,7 @@ func (system *NTPSystem) Query(address string, messages int) (float64, float64) 
 	}
 	association := &Association{
 		hmode: CLIENT,
-		hpoll: MINPOLL,
+		hpoll: 0,
 		ReceivePacket: ReceivePacket{
 			srcaddr: addr,
 			dstaddr: system.address,
@@ -384,7 +382,10 @@ func (system *NTPSystem) Query(address string, messages int) (float64, float64) 
 		}
 	}
 
-	return minDelayStage.offset, system.rootDist(association)
+	// lambda is error in a given sample's offset
+	lambda := float64(association.Rootdelay)/2 + float64(association.Rootdisp) + minDelayStage.delay
+
+	return minDelayStage.offset, lambda
 }
 
 func (system *NTPSystem) Start() {
@@ -539,7 +540,7 @@ func (system *NTPSystem) clockAdjust() {
 	//  TODO: Might need to wrap this in system.hold == 0 ??
 	system.clock.offset -= dtemp
 	debug("*****ADJUSTING:")
-	debug("SYS OFFSET:", system.offset, "CLOCK OFFSET:", system.clock.offset)
+	debug("TIME:", system.clock.t, "SYS OFFSET:", system.offset, "CLOCK OFFSET:", system.clock.offset)
 	debug("FREQ: ", system.clock.freq*1e6, "OFFSET (dtemp):", dtemp*1e6)
 	adjustTime(system.clock.freq + dtemp)
 
@@ -584,11 +585,10 @@ func (system *NTPSystem) clockAdjust() {
 			"COUNT:", system.clock.count,
 		)
 		for _, association := range system.associations {
-			refidVal := "_IP_"
-			if association.Stratum == 1 {
-				refidBin := make([]byte, 4)
-				binary.BigEndian.PutUint32(refidBin, association.Refid)
-				refidVal = string(refidBin)
+			ip := refIDToIP(association.Refid)
+			refid := ip.String()
+			if association.Stratum < 2 {
+				refid = string(ip)
 			}
 			sync := "SYNC"
 			if association.leap == NOSYNC {
@@ -600,7 +600,7 @@ func (system *NTPSystem) clockAdjust() {
 				"POLL:", strconv.Itoa(int(Log2ToDouble(association.Poll)))+"s",
 				"hPOLL:", strconv.Itoa(int(Log2ToDouble(association.Poll)))+"s",
 				"STRATUM:", association.Stratum,
-				"REFID:", refidVal,
+				"REFID:", refid,
 				"OFFSET:", association.offset,
 				"JITTER:", association.jitter,
 				"TIME FILTERED:", association.t,
@@ -735,13 +735,12 @@ func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 	}
 
 	if packet.mode > 5 {
-		refidVal := "_IP_"
-		if packet.Stratum == 1 {
-			refidBin := make([]byte, 4)
-			binary.BigEndian.PutUint32(refidBin, packet.Refid)
-			refidVal = string(refidBin)
+		ip := refIDToIP(association.Refid)
+		refid := ip.String()
+		if association.Stratum < 2 {
+			refid = string(ip)
 		}
-		info("ERROR: Received packet.mode > 5 for association with addr:", refidVal)
+		info("ERROR: Received packet.mode > 5 for association with addr:", refid)
 		associationIdx := -1
 		for idx, assoc := range system.associations {
 			if assoc == association {
@@ -819,9 +818,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		// Process KoD code
 		kod = true
 
-		codeBin := make([]byte, 4)
-		binary.BigEndian.PutUint32(codeBin, association.Refid)
-		code := string(codeBin)
+		code := string(refIDToIP(packet.Refid))
 
 		switch code {
 		case "DENY", "RSTR":
@@ -923,7 +920,7 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
 	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.Refid = uint32(system.refid)
+	transmitPacket.Refid = system.refid
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = receivePacket.Xmt
 	transmitPacket.Rec = receivePacket.dst
@@ -967,7 +964,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
 	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
-	transmitPacket.Refid = uint32(system.refid)
+	transmitPacket.Refid = system.refid
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = association.Org
 	transmitPacket.Rec = association.Rec
@@ -989,30 +986,13 @@ func (system *NTPSystem) pollPeer(association *Association) {
 		// x.dgst = md5(p->keyid);
 	}
 
-	go func() {
-		var encoded bytes.Buffer
-		writer := bufio.NewWriter(&encoded)
+	transmitPacket.Xmt = GetSystemTime()
+	association.Xmt = transmitPacket.Xmt
 
-		var firstByte byte
-		firstByte = transmitPacket.leap << 6
-		firstByte |= transmitPacket.version << 3
-		firstByte |= byte(transmitPacket.mode)
-
-		writer.WriteByte(firstByte)
-
-		transmitPacket.Xmt = GetSystemTime()
-		association.Xmt = transmitPacket.Xmt
-		if err := binary.Write(writer, binary.BigEndian, transmitPacket.NTPFieldsEncoded); err != nil {
-			panic("encoded transmit packet err")
-		}
-
-		writer.Flush()
-
-		_, err := system.conn.WriteTo(encoded.Bytes(), transmitPacket.dstaddr)
-		if err != nil {
-			fmt.Println("Error", err)
-		}
-	}()
+	_, err := system.conn.WriteTo(encodeTransmitPacket(transmitPacket), transmitPacket.dstaddr)
+	if err != nil {
+		fmt.Println("Error", err)
+	}
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
@@ -1286,7 +1266,6 @@ func (system *NTPSystem) clockSelect() {
 		 */
 		if found > allow {
 			continue
-
 		}
 
 		if high > low {
@@ -1468,7 +1447,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		system.leap = association.leap
 		system.t = uint64(association.t)
 		system.stratum = association.Stratum + 1
-		system.refid = byte(association.Refid)
+		system.refid = association.Refid
 		system.reftime = association.Reftime
 		system.rootdelay = float64(association.Rootdelay) + association.delay
 		dtemp := math.Sqrt(math.Pow(association.jitter, 2) + math.Pow(system.jitter, 2))
@@ -1798,7 +1777,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if association.Refid == binary.BigEndian.Uint32(association.dstaddr.IP) || association.Refid == uint32(system.refid) {
+	if association.Refid == ipToRefID(association.dstaddr.IP) || association.Refid == system.refid {
 		return false
 	}
 
@@ -1830,4 +1809,14 @@ func containsAssociation(survivors []Survivor, association *Association) bool {
 		}
 	}
 	return false
+}
+
+func refIDToIP(refID NTPShortEncoded) net.IP {
+	ipBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(ipBytes, refID)
+	return net.IP(ipBytes)
+}
+
+func ipToRefID(ip net.IP) NTPShortEncoded {
+	return binary.LittleEndian.Uint32(ip)
 }

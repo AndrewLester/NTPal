@@ -24,10 +24,10 @@ func readDriftInfo(system *NTPSystem) (float64, map[string]ServerPollInterval) {
 
 	reader := bufio.NewReader(file)
 	text, _ := reader.ReadString('\n')
-
+	text = text[:len(text)-1]
 	frequency, err := strconv.ParseFloat(text, 64)
 	if err != nil {
-		log.Fatal("NTP drift file invalid. Delete:", system.drift)
+		log.Fatal("NTP drift file invalid. Delete: ", system.drift)
 	}
 
 	serverPollIntervals := map[string]ServerPollInterval{}
@@ -48,7 +48,7 @@ func readDriftInfo(system *NTPSystem) (float64, map[string]ServerPollInterval) {
 
 func writeDriftInfo(system *NTPSystem) {
 	file, err := os.Open(system.drift)
-	if errors.Is(err, fs.ErrExist) {
+	if errors.Is(err, fs.ErrNotExist) {
 		file, err = os.Create(system.drift)
 		if err != nil {
 			log.Fatalf("Could not create drift file: %v", err)

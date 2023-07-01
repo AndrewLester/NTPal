@@ -11,3 +11,9 @@ The server is hosted on [fly.io](https://fly.io/) with a configuration outlined 
 ## NTPal &mdash; Query
 
 NTPal supports a simpler "query" flag to simply obtain your device's time offset from an NTP server. Accessible via `--query` or `-q`, 5 messages are sent in an attempt to obtain the best measurement possible. This command functions almost identically to the `sntp` command shipped with OSX, though NTPal has far less functionality.
+
+## Development
+
+### Run
+
+    sudo -E go run github.com/AndrewLester/ntpal/cmd/ntpal --config ntp.conf --drift ntp.drift

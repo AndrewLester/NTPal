@@ -28,17 +28,15 @@ func decodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	clientUDPAddr := net.UDPAddrFromAddrPort(clientAddrPort)
 	localUDPAddr := net.UDPAddrFromAddrPort(localAddrPort)
 
-	var leap, version, mode byte
-
 	reader := bytes.NewReader(encoded)
 	firstByte, err := reader.ReadByte()
 	if err != nil {
 		return nil, err
 	}
 
-	leap = firstByte >> 6
-	version = (firstByte >> 3) & 0b111
-	mode = firstByte & 0b111
+	leap := firstByte >> 6
+	version := (firstByte >> 3) & 0b111
+	mode := firstByte & 0b111
 
 	ntpFieldsEncoded := NTPFieldsEncoded{}
 	if err := binary.Read(reader, binary.BigEndian, &ntpFieldsEncoded); err != nil {

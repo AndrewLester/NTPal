@@ -6,11 +6,10 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/AndrewLester/ntpal/internal/templates"
 	"github.com/AndrewLester/ntpal/pkg/ntp"
-	"golang.org/x/sys/unix"
 )
 
 type SyncRequest struct {
@@ -28,14 +27,8 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		var now unix.Timespec
-		unix.ClockGettime(unix.CLOCK_MONOTONIC, &now)
-
-		nowTime := time.Unix(now.Unix())
-
 		data := map[string]string{
-			"Region": os.Getenv("FLY_REGION"),
-			"Time":   nowTime.Format(time.RFC3339),
+			"Region": strings.ToUpper(os.Getenv("FLY_REGION")),
 		}
 
 		// Set these headers to bump performance.now() precision to 5 microseconds
