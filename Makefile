@@ -3,7 +3,7 @@ SHELL := /bin/bash -f
 .PHONY: all
 
 all:
-	go build -o bin/ntp github.com/AndrewLester/ntpal/cmd/ntp && go build -o bin/ntp-report github.com/AndrewLester/ntpal/cmd/ntp-report
+	go build -o bin/ntpal github.com/AndrewLester/ntpal/cmd/ntpal && go build -o bin/ntpal-report github.com/AndrewLester/ntpal/cmd/ntpal-report
 
 clean:
-	rm bin/ntp; rm bin/ntp-report
+	rm bin/ntpal; rm bin/ntpal-report
