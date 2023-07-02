@@ -564,7 +564,7 @@ func (system *NTPSystem) clockAdjust() {
 	}
 
 	// Once per hour, write the clock frequency to a file.
-	if system.clock.t%3600 == 3599 {
+	if system.clock.t%20 == 19 {
 		writeDriftInfo(system)
 	}
 
@@ -894,7 +894,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 			packet.Rec)), Log2ToDouble(system.precision))
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))
-		info("SAMPLE: offset:", offset, "delay:", delay, "disp:", disp)
+		info("SAMPLE: offset:", offset, "delay:", delay, "disp:", disp, "packet prec:", packet.Precision)
 	}
 
 	// Don't use this offset/delay if KoD, probably invalid

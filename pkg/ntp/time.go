@@ -30,9 +30,9 @@ func NTPTimestampDifferenceToDouble(difference int64) float64 {
 
 func Log2ToDouble(a int8) float64 {
 	if a < 0 {
-		return 1.0 / float64(int32(1)<<-a)
+		return 1.0 / float64(int64(1)<<-a)
 	}
-	return float64(int32(1) << a)
+	return float64(int64(1) << a)
 }
 
 func NTPTimestampToTime(ntpTimestamp NTPTimestampEncoded) time.Time {

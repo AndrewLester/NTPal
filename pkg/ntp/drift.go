@@ -2,8 +2,6 @@ package ntp
 
 import (
 	"bufio"
-	"errors"
-	"io/fs"
 	"log"
 	"os"
 	"strconv"
@@ -47,17 +45,9 @@ func readDriftInfo(system *NTPSystem) (float64, map[string]ServerPollInterval) {
 }
 
 func writeDriftInfo(system *NTPSystem) {
-	file, err := os.Open(system.drift)
-	if errors.Is(err, fs.ErrNotExist) {
-		file, err = os.Create(system.drift)
-		if err != nil {
-			log.Fatalf("Could not create drift file: %v", err)
-		}
-	} else if err != nil {
-		log.Fatalf("Could not open drift file: %v", err)
-	} else {
-		file.Truncate(0)
-		file.Seek(0, 0)
+	file, err := os.OpenFile(system.drift, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		log.Fatalf("Could not open or create drift file: %v", err)
 	}
 	defer file.Close()
 
