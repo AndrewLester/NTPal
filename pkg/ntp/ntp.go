@@ -182,6 +182,10 @@ type Association struct {
 	// Values set by received packet
 	ReceivePacket
 
+	// Override Rootdelay and Rootdisp to make them floats
+	Rootdelay float64
+	Rootdisp  float64
+
 	/*
 	 * Computed data
 	 */
@@ -383,7 +387,7 @@ func (system *NTPSystem) Query(address string, messages int) (float64, float64) 
 	}
 
 	// lambda is error in a given sample's offset
-	lambda := float64(association.Rootdelay)/2 + float64(association.Rootdisp) + minDelayStage.delay
+	lambda := association.Rootdelay/2 + association.Rootdisp + minDelayStage.delay
 
 	return minDelayStage.offset, lambda
 }
@@ -841,8 +845,8 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		association.Stratum = packet.Stratum
 	}
 	association.mode = packet.mode
-	association.Rootdelay = uint32(float64(packet.Rootdelay) / NTPShortLength)
-	association.Rootdisp = uint32(float64(packet.Rootdisp) / NTPShortLength)
+	association.Rootdelay = float64(packet.Rootdelay) / NTPShortLength
+	association.Rootdisp = float64(packet.Rootdisp) / NTPShortLength
 	association.Refid = packet.Refid
 	association.Reftime = packet.Reftime
 
@@ -854,7 +858,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		return
 	}
 
-	if association.Rootdelay/2+association.Rootdisp >= uint32(MAXDISP) || association.Reftime >
+	if association.Rootdelay/2+association.Rootdisp >= MAXDISP || association.Reftime >
 		packet.Xmt {
 
 		return /* invalid header values */
@@ -1449,11 +1453,11 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		system.stratum = association.Stratum + 1
 		system.refid = association.Refid
 		system.reftime = association.Reftime
-		system.rootdelay = float64(association.Rootdelay) + association.delay
+		system.rootdelay = association.Rootdelay + association.delay
 		dtemp := math.Sqrt(math.Pow(association.jitter, 2) + math.Pow(system.jitter, 2))
 		dtemp += math.Max(association.disp+PHI*(float64(system.clock.t)-association.t)+
 			math.Abs(association.offset), MINDISP)
-		system.rootdisp = float64(association.Rootdisp) + dtemp
+		system.rootdisp = association.Rootdisp + dtemp
 	/*
 	 * Some samples are discarded while, for instance, a direct
 	 * frequency measurement is being made.
@@ -1798,8 +1802,8 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return math.Max(MINDISP, float64(association.Rootdelay)+association.delay)/2 +
-		float64(association.Rootdisp) + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter
+	return math.Max(MINDISP, association.Rootdelay+association.delay)/2 +
+		association.Rootdisp + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter
 }
 
 func containsAssociation(survivors []Survivor, association *Association) bool {

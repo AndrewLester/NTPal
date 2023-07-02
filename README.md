@@ -17,3 +17,14 @@ NTPal supports a simpler "query" flag to simply obtain your device's time offset
 ### Run
 
     sudo -E go run github.com/AndrewLester/ntpal/cmd/ntpal --config ntp.conf --drift ntp.drift
+
+### Debug Log Transform
+
+Remove this first;
+Adjtime: 0 16
+**\***ADJUSTING:
+
+CTRL+F
+
+    TIME: (\d+?) SYS OFFSET: (.*?) CLOCK OFFSET: (.*?)\nFREQ:  (.*?) OFFSET \(dtemp\): (.*?)\n
+    $1,$2,$3,$4,$5\n

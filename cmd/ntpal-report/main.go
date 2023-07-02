@@ -62,5 +62,5 @@ func main() {
 	})
 
 	log.Println("listening on", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe("localhost:"+port, nil))
 }
