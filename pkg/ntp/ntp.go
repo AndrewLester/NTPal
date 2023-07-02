@@ -42,7 +42,7 @@ const BCOUNT = 8   /* packets in a burst */
 const BTIME = 2    /* burst interval (s) */
 
 const STEPT = .128     /* step threshold (s) */
-const WATCH = 300      /* stepout threshold (s) */
+const WATCH = 600      /* stepout threshold (s) */
 const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
 const FLL = 4          /* FLL loop gain */
@@ -564,7 +564,7 @@ func (system *NTPSystem) clockAdjust() {
 	}
 
 	// Once per hour, write the clock frequency to a file.
-	if system.clock.t%20 == 19 {
+	if system.clock.t%3600 == 3599 {
 		writeDriftInfo(system)
 	}
 
@@ -575,6 +575,7 @@ func (system *NTPSystem) clockAdjust() {
 			"T:", system.t,
 			"OFFSET:", system.offset,
 			"JITTER:", system.jitter,
+			"PEER:", system.p.srcaddr.IP,
 			"POLL:", system.poll,
 			"HOLD:", system.hold,
 		)
@@ -822,7 +823,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 		// Process KoD code
 		kod = true
 
-		code := string(refIDToIP(packet.Refid))
+		code := string(refIDToIP(packet.Refid).To4())
 
 		switch code {
 		case "DENY", "RSTR":
@@ -1641,6 +1642,10 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		 */
 		case FREQ:
 			if mu < WATCH {
+				// An addition to help better find the initial frequency, since sometimes the step is bad
+				if system.clock.offset == 0 {
+					system.clock.offset = offset
+				}
 				return IGNORE
 			}
 
@@ -1817,10 +1822,10 @@ func containsAssociation(survivors []Survivor, association *Association) bool {
 
 func refIDToIP(refID NTPShortEncoded) net.IP {
 	ipBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(ipBytes, refID)
+	binary.BigEndian.PutUint32(ipBytes, refID)
 	return net.IP(ipBytes)
 }
 
 func ipToRefID(ip net.IP) NTPShortEncoded {
-	return binary.LittleEndian.Uint32(ip)
+	return binary.BigEndian.Uint32(ip)
 }
