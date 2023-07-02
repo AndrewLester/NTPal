@@ -569,13 +569,17 @@ func (system *NTPSystem) clockAdjust() {
 	}
 
 	if system.clock.t%10 == 0 {
+		sysPeerIP := "NONE"
+		if system.p != nil {
+			sysPeerIP = system.p.srcaddr.IP.String()
+		}
 		info("*****REPORT:")
 		info(
 			"(SYSTEM):",
 			"T:", system.t,
 			"OFFSET:", system.offset,
 			"JITTER:", system.jitter,
-			"PEER:", system.p.srcaddr.IP,
+			"PEER:", sysPeerIP,
 			"POLL:", system.poll,
 			"HOLD:", system.hold,
 		)
@@ -607,7 +611,7 @@ func (system *NTPSystem) clockAdjust() {
 				"STRATUM:", association.Stratum,
 				"REFID:", refid,
 				"OFFSET:", association.offset,
-				"JITTER:", association.jitter,
+				"REACH:", strconv.FormatInt(int64(association.reach), 2),
 				"TIME FILTERED:", association.t,
 			)
 		}

@@ -11,7 +11,7 @@ func shouldSetTime() bool {
 
 func info(args ...any) {
 	if isInfo() {
-		fmt.Println(args...)
+		fmt.Fprintln(os.Stderr, args...)
 	}
 }
 
