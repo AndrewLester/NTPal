@@ -1647,9 +1647,9 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		case FREQ:
 			if mu < WATCH {
 				// An addition to help better find the initial frequency, since sometimes the step is bad
-				if system.clock.offset == 0 {
-					system.clock.offset = offset
-				}
+				// if system.clock.offset == 0 {
+				// 	system.clock.offset = offset
+				// }
 				return IGNORE
 			}
 

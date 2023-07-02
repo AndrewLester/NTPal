@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>Time</title>
+        <title>Time | Andrew Lester</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -268,9 +268,6 @@
             };
 
             async function synchronize() {
-                // Sleep to let more important stuff finish
-                await sleep(1000);
-
                 const attempts = [];
                 for (let i = 0; i < 5; i++) {
                     attempts.push(await syncRequest());
