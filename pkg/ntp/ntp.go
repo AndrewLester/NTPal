@@ -17,7 +17,7 @@ import (
 const PORT = 123           // NTP port number
 const VERSION byte = 4     // NTP version number
 const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 6     //minimum poll exponent (16 s)
+const MINPOLL int8 = 6     //minimum poll exponent (64 s)
 const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
@@ -547,8 +547,6 @@ func (system *NTPSystem) clockAdjust() {
 	debug("TIME:", system.clock.t, "SYS OFFSET:", system.offset, "CLOCK OFFSET:", system.clock.offset)
 	debug("FREQ: ", system.clock.freq*1e6, "OFFSET (dtemp):", dtemp*1e6)
 	adjustTime(system.clock.freq + dtemp)
-
-	// info("Adjusting:", system.clock.freq+dtemp, dtemp)
 
 	system.clock.lock.Unlock()
 
@@ -1107,8 +1105,6 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 
 	sort.Sort(ByDelay{&f})
 
-	info("Filter list:", f)
-
 	m := 0
 	for i := 0; i < NSTAGE; i++ {
 		if f[i].delay >= MAXDISP || (m >= 2 && f[i].delay >= float64(MAXDIST)) {
@@ -1125,8 +1121,6 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 			association.jitter += math.Pow((f[0].offset - f[i].offset), 2)
 		}
 	}
-
-	info("m samples survive:", m)
 
 	if m == 0 {
 		system.clockSelect()
@@ -1216,8 +1210,6 @@ func (system *NTPSystem) clockSelect() {
 		n += 3
 	}
 
-	info("Chimers:", len(system.m))
-
 	sort.Sort(ByEdge{system.m})
 
 	/*
@@ -1238,7 +1230,6 @@ func (system *NTPSystem) clockSelect() {
 		found := 0
 		chime := 0
 		for i := 0; i < n; i++ {
-			info("Finding low:", chime, m-allow, system.m[i])
 			chime -= system.m[i].levelType
 			if chime >= m-allow {
 				low = system.m[i].edge
@@ -1283,7 +1274,6 @@ func (system *NTPSystem) clockSelect() {
 	}
 
 	if high < low {
-		info("interval not found", high, low)
 		return
 	}
 
@@ -1307,8 +1297,6 @@ func (system *NTPSystem) clockSelect() {
 		})
 		system.n++
 	}
-
-	info("Survivors:", system.n)
 
 	/*
 	 * There must be at least NSANE survivors to satisfy the
@@ -1393,6 +1381,7 @@ func (system *NTPSystem) clockSelect() {
 }
 
 func (system *NTPSystem) clockUpdate(association *Association) {
+	info("Clock update**")
 	/*
 	 * If this is an old update, for instance, as the result of a
 	 * system peer change, avoid it.  We never use an old sample or
@@ -1456,7 +1445,11 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		system.leap = association.leap
 		system.t = uint64(association.t)
 		system.stratum = association.Stratum + 1
-		system.refid = association.Refid
+		if association.Stratum == 0 || association.Stratum == 16 {
+			system.refid = association.Refid
+		} else {
+			system.refid = ipToRefID(association.srcaddr.IP)
+		}
 		system.reftime = association.Reftime
 		system.rootdelay = association.Rootdelay + association.delay
 		dtemp := math.Sqrt(math.Pow(association.jitter, 2) + math.Pow(system.jitter, 2))
@@ -1831,5 +1824,5 @@ func refIDToIP(refID NTPShortEncoded) net.IP {
 }
 
 func ipToRefID(ip net.IP) NTPShortEncoded {
-	return binary.BigEndian.Uint32(ip)
+	return binary.BigEndian.Uint32(ip.To4())
 }

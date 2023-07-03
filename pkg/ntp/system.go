@@ -50,8 +50,6 @@ func adjustTime(offset float64) {
 		Usec += 1e6
 	}
 
-	info("Adjust time:", Sec, Usec)
-
 	if shouldSetTime() {
 		err := adjtime.Adjtime(Sec, Usec)
 		if err != nil {

@@ -51,7 +51,7 @@ func writeDriftInfo(system *NTPSystem) {
 	}
 	defer file.Close()
 
-	debug("Writing clock freq:", system.clock.freq)
+	info("Writing clock freq:", system.clock.freq, "associations:", len(system.associations))
 	_, err = file.WriteString(strconv.FormatFloat(system.clock.freq, 'E', -1, 64) + "\n")
 	if err != nil {
 		log.Fatalf("Could not write to drift file: %v", err)
