@@ -8,7 +8,12 @@
             href="https://fonts.googleapis.com/css2?family=Oswald&display=swap"
             rel="stylesheet"
         />
-        <link rel="icon" href="https://andrewlester.net/favicon.ico" />
+        <!-- Use this weird URL for favicon since this page has strict Cross-Origin-Embedder-Policy set. -->
+        <!-- Specifically, "crossorigin" attribute doesn't work on <link> in Chrome and "credentialless" header value not implemented enough -->
+        <link
+            rel="icon"
+            href="https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://andrewlester.net&size=32"
+        />
         <meta charset="UTF-8" />
         <meta name="description" content="A time server" />
         <meta name="author" content="Andrew Lester" />
