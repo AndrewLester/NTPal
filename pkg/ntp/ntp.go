@@ -749,22 +749,8 @@ func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 	}
 
 	if packet.mode > 5 {
-		ip := refIDToIP(association.Refid)
-		refid := ip.String()
-		if association.Stratum < 2 {
-			refid = string(ip)
-		}
-		info("ERROR: Received packet.mode > 5 for association with addr:", refid)
-		associationIdx := -1
-		for idx, assoc := range system.associations {
-			if assoc == association {
-				associationIdx = idx
-				break
-			}
-		}
-		if associationIdx != -1 {
-			RemoveIndex(&system.associations, associationIdx)
-		}
+		info("ERROR: Received packet.mode > 5 for association with addr:", packet.srcaddr.IP)
+		info("Packet", packet)
 		return nil
 	}
 
