@@ -27,7 +27,7 @@ Adjtime: 0 16
 CTRL+F
 
 ```
-*****ADJUSTING:\nTIME: (\d+?) SYS OFFSET: (.*?) CLOCK OFFSET: (.*?)\nFREQ:  (.*?) OFFSET \(dtemp\): (.*?)\n(Adjtime:  0 -37\n)?
+\*\*\*\*\*ADJUSTING:\nTIME: (\d+?) SYS OFFSET: (.*?) CLOCK OFFSET: (.*?)\nFREQ:  (.*?) OFFSET \(dtemp\): (.*?)\n(Adjtime:  .*? .*?\n)?
 
 $1,$2,$3,$4,$5\n
 ```
