@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -62,5 +63,7 @@ func main() {
 	})
 
 	log.Println("listening on", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+
+	host := os.Getenv("REPORT_HOST")
+	log.Fatal(http.ListenAndServe(net.JoinHostPort(host, port), nil))
 }
