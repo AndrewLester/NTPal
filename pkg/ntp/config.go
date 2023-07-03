@@ -16,15 +16,16 @@ type NTPConfig struct {
 }
 
 type ServerAssociationConfig struct {
-	address *net.UDPAddr
-	burst   bool
-	iburst  bool
-	prefer  bool
-	key     int
-	version int
-	minpoll int
-	maxpoll int
-	hmode   Mode
+	address  *net.UDPAddr
+	hostname string
+	burst    bool
+	iburst   bool
+	prefer   bool
+	key      int
+	version  int
+	minpoll  int
+	maxpoll  int
+	hmode    Mode
 }
 
 const DEFAULT_MINPOLL = 6
@@ -87,15 +88,16 @@ func ParseConfig(path string) NTPConfig {
 			}
 
 			serverAssociation := ServerAssociationConfig{
-				address: address,
-				burst:   burst,
-				iburst:  iburst,
-				prefer:  prefer,
-				key:     key,
-				version: version,
-				minpoll: minpoll,
-				maxpoll: maxpoll,
-				hmode:   CLIENT,
+				address:  address,
+				hostname: arguments[1],
+				burst:    burst,
+				iburst:   iburst,
+				prefer:   prefer,
+				key:      key,
+				version:  version,
+				minpoll:  minpoll,
+				maxpoll:  maxpoll,
+				hmode:    CLIENT,
 			}
 			serverAssociations = append(serverAssociations, serverAssociation)
 		case "driftfile":

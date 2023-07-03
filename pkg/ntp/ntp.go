@@ -37,9 +37,9 @@ const NMAX = 50     /* maximum number of peers */
 const NSANE = 1     /* % minimum intersection survivors */
 const NMIN = 3      /* % minimum cluster survivors */
 const NTP_FWEIGHT = 0.5
-const UNREACH = 12 /* unreach counter threshold */
-const BCOUNT = 8   /* packets in a burst */
-const BTIME = 2    /* burst interval (s) */
+const UNREACH = 8 /* unreach counter threshold */
+const BCOUNT = 8  /* packets in a burst */
+const BTIME = 2   /* burst interval (s) */
 
 const STEPT = .128     /* step threshold (s) */
 const WATCH = 600      /* stepout threshold (s) */
@@ -206,6 +206,8 @@ type Association struct {
 	unreach  int
 	outdate  int32
 	nextdate int32
+
+	hostname string
 
 	burstEnabled  bool
 	iburstEnabled bool
@@ -399,7 +401,7 @@ func (system *NTPSystem) Start() {
 		system.drift = config.driftfile
 	}
 
-	freq, serverPollIntervals := readDriftInfo(system)
+	freq := readDriftInfo(system)
 	if freq != 0 {
 		system.clock.freq = freq
 		system.rstclock(FSET, 0, 0)
@@ -417,7 +419,7 @@ func (system *NTPSystem) Start() {
 	}
 	system.address = address
 
-	system.setupAssociations(config.servers, serverPollIntervals)
+	system.setupAssociations(config.servers)
 
 	if system.mode == SERVER {
 		system.listen()
@@ -429,11 +431,12 @@ func (system *NTPSystem) Start() {
 	system.wg.Wait()
 }
 
-func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociationConfig, serverPollIntervals map[string]ServerPollInterval) {
+func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociationConfig) {
 	for _, associationConfig := range associationConfigs {
 		association := &Association{
-			hmode: associationConfig.hmode,
-			hpoll: int8(associationConfig.minpoll),
+			hmode:    associationConfig.hmode,
+			hpoll:    int8(associationConfig.minpoll),
+			hostname: associationConfig.hostname,
 			ReceivePacket: ReceivePacket{
 				srcaddr: associationConfig.address,
 				dstaddr: system.address,
@@ -445,10 +448,6 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 
 		association.burstEnabled = associationConfig.burst
 		association.iburstEnabled = associationConfig.iburst
-
-		if poll, ok := serverPollIntervals[associationConfig.address.IP.String()]; ok {
-			association.hpoll = poll.poll
-		}
 
 		system.associations = append(system.associations, association)
 	}
@@ -610,6 +609,7 @@ func (system *NTPSystem) clockAdjust() {
 				"REFID:", refid,
 				"OFFSET:", association.offset,
 				"REACH:", strconv.FormatInt(int64(association.reach), 2),
+				"UNREACH:", association.unreach,
 				"TIME FILTERED:", association.t,
 			)
 		}
@@ -691,7 +691,14 @@ func (system *NTPSystem) sendPoll(association *Association) {
 			} else if association.unreach < UNREACH {
 				association.unreach++
 			} else {
+				// Try to get a new IP
+				addr, err := net.ResolveUDPAddr("udp", association.hostname+":123")
+				if err != nil {
+					log.Fatal("Invalid address: ", association.hostname)
+				}
+				association.srcaddr = addr
 				hpoll++
+				association.unreach = -1
 			}
 			association.unreach++
 		} else {
@@ -781,7 +788,7 @@ func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 		return nil
 	}
 
-	info("Processing packet from:", packet.srcaddr.IP)
+	info("****Processing packet from:", packet.srcaddr.IP)
 
 	if association == nil {
 		info("Association shouldn't be nil here...")
@@ -818,7 +825,6 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 
 	association.leap = packet.leap
 	association.Poll = packet.Poll
-	info("Poll received from server:", association.Poll)
 	if packet.Stratum == 0 {
 		association.Stratum = MAXSTRAT
 
@@ -897,7 +903,6 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 			packet.Rec)), Log2ToDouble(system.precision))
 		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
 			NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))
-		info("SAMPLE: offset:", offset, "delay:", delay, "disp:", disp, "packet prec:", packet.Precision)
 	}
 
 	// Don't use this offset/delay if KoD, probably invalid
@@ -1011,8 +1016,8 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 			association.nextdate += BTIME
 		}
 	} else {
-		info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
-			float64(association.hpoll)), float64(MINPOLL))), association.Poll, association.hpoll)
+		// info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
+		// 	float64(association.hpoll)), float64(MINPOLL))), association.Poll, association.hpoll)
 		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
 			float64(association.hpoll)), float64(MINPOLL))))
 	}
