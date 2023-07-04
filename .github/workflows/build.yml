@@ -8,7 +8,7 @@ jobs:
   build:
     strategy:
       matrix:
-          os: [ubuntu-latest, windows-latest, macos-latest]
+          os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v3
@@ -35,10 +35,6 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: ntpal-binary-ubuntu-latest
-    - name: Download Windows
-      uses: actions/download-artifact@v3
-      with:
-        name: ntpal-binary-windows-latest
     - name: Download Macos
       uses: actions/download-artifact@v3
       with:
@@ -63,15 +59,6 @@ jobs:
         asset_path: ${{ github.workspace }}/ntpal-binary-ubuntu-latest
         asset_name: ntpal-ubuntu
         asset_content_type: application/octet-stream
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1.0.1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{ github.workspace }}/ntpal-binary-windows-latest
-        asset_name: ntpal-windows.exe
-        asset_content_type: application/vnd.microsoft.portable-executable
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1.0.1
       env:
