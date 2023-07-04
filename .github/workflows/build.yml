@@ -1,0 +1,83 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+          os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.19
+
+    - name: Build
+      run: make
+
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: ntpal-binary-${{ matrix.os }}
+        path: ${{ github.workspace }}/bin/ntpal
+  
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Download Ubuntu
+      uses: actions/download-artifact@v3
+      with:
+        name: ntpal-binary-ubuntu-latest
+    - name: Download Windows
+      uses: actions/download-artifact@v3
+      with:
+        name: ntpal-binary-windows-latest
+    - name: Download Macos
+      uses: actions/download-artifact@v3
+      with:
+        name: ntpal-binary-macos-latest
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: "### Release for ref - ${{ github.ref }}\nChanges:\n- ${{ join(github.event.commits.*.message, '\n- ') }}"
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1.0.1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ github.workspace }}/ntpal-binary-ubuntu-latest
+        asset_name: ntpal-ubuntu
+        asset_content_type: application/octet-stream
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1.0.1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ github.workspace }}/ntpal-binary-windows-latest
+        asset_name: ntpal-windows.exe
+        asset_content_type: application/vnd.microsoft.portable-executable
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1.0.1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ github.workspace }}/ntpal-binary-macos-latest
+        asset_name: ntpal-macos
+        asset_content_type: application/octet-stream
