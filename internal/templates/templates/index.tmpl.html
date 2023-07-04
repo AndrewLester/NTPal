@@ -110,12 +110,13 @@
                 font-family: 'Oswald';
                 text-transform: uppercase;
                 font-size: 3rem;
+                margin-top: 25px;
                 margin-bottom: 35px;
                 line-height: 1.1;
             }
 
             h2 {
-                margin-bottom: 20px;
+                margin-bottom: 15px;
                 font-weight: normal;
             }
 
@@ -137,7 +138,7 @@
                 display: flex;
                 flex-flow: row nowrap;
                 align-items: center;
-                gap: 5px;
+                gap: 10px;
                 background-color: var(--surface-dark);
                 padding: 1em 1em;
                 border-radius: 10px;
@@ -161,7 +162,9 @@
 
             .region {
                 font-style: italic;
-                margin-top: 10px;
+                margin-top: 15px;
+                font-size: 0.85rem;
+                opacity: 0.65;
             }
 
             @media (max-width: 500px) {
@@ -286,22 +289,26 @@
                 }
 
                 const { offset } = minDelayAttempt;
+                let serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
+
+                // Wait for the second to hit
+                await sleep(1e3 - (serverTime % 1e3));
+                setInterval(() => {
+                    const serverTime = new Date(
+                        (Date.now() / 1e3 + offset) * 1e3
+                    );
+                    displayTime(serverTime);
+                }, 1000);
+
+                serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
+                displayTime(serverTime);
+
                 const offsetMessage = offset < 0 ? 'ahead' : 'behind';
                 elems.offset.textContent = `${offsetMessage} by ${Math.abs(
                     offset
                 ).toFixed(3)} seconds`; // We do have up to microsecond precision, but it's not great...
                 elems.offset.classList.add('done');
 
-                const serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
-
-                elems.date.textContent = serverTime.toLocaleString('en', {
-                    dateStyle: 'full',
-                });
-                elems.date.classList.add('done');
-
-                elems.time.textContent = serverTime.toLocaleString('en', {
-                    timeStyle: 'full',
-                });
                 elems.time.classList.add('done');
             }
 
@@ -338,9 +345,23 @@
                 };
             }
 
+            function displayTime(time) {
+                elems.date.textContent = time.toLocaleString('en', {
+                    dateStyle: 'full',
+                });
+                elems.date.classList.add('done');
+
+                elems.time.textContent = time.toLocaleString('en', {
+                    timeStyle: 'full',
+                });
+            }
+
             const eraLength = 4_294_967_296n; // 2^32
             const unixEraOffset = 2_208_988_800; // 1970 - 1900 in seconds
 
+            // TODO: This whole "start" thing is probably slightly wrong.
+            // Should be start = Date.now(), performance.now(), then add performance diff instead of new Date.now()
+            // Didn't seem to work as well during testing though...
             let start;
             function getSystemTime(addLast = false) {
                 let now = Date.now();
