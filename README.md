@@ -4,7 +4,7 @@ NTPal is an in-development, incomplete, and rough around the edges implementatio
 
 ## Code Credits
 
-The code for NTPal is _very_ similar to pseudocode provided in the [NTPv4 RFC](https://datatracker.ietf.org/doc/html/rfc5905), which is nicely documented and made for a good rewriting experience. Certain changes were made based on more recent additions to projects such as [ntpd](https://github.com/ntp-project/ntp), [chrony](https://github.com/mlichvar/chrony), and others. Additionally, some care was taken to map the program's requirements into better-fit Golang structures, but there's still some room for improvement (especially regarding race conditions).
+The code for NTPal is _very_ similar to pseudocode provided in the [NTPv4 RFC](https://datatracker.ietf.org/doc/html/rfc5905), which is nicely documented and made for a good rewriting experience. Certain changes were made based on more recent additions to projects such as [ntpd](https://github.com/ntp-project/ntp), [chrony](https://github.com/mlichvar/chrony), and others. Additionally, some care was taken to map the program's requirements into better-fit Golang structures, but there's room for improvement (especially regarding race conditions).
 
 ## Usage
 
@@ -24,6 +24,12 @@ NTPal uses a configuration format similar to the [standard `ntpd` config](https:
 
 -   `server <address> [key _key_] [burst] [iburst] [version _version_] [prefer] [minpoll _minpoll_] [maxpoll _maxpoll_]`
 -   `driftfile <path>`
+
+Some environment variables are also available to configure the application's runtime and logging:
+
+-   `SYMMETRIC`: Set to "1" to allow symmetric active servers to connect.
+-   `INFO`: Set to "1" to print periodic system information logs.
+-   `DEBUG`: Set to "1" to print timeseries clock statistics meant for graphing.
 
 ### NTPal &mdash; Query
 

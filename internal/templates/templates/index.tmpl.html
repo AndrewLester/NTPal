@@ -289,18 +289,16 @@
                 }
 
                 const { offset } = minDelayAttempt;
-                let serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
+                let serverTime = new Date(Date.now() + offset / 1e3);
 
                 // Wait for the second to hit
                 await sleep(1e3 - (serverTime % 1e3));
                 setInterval(() => {
-                    const serverTime = new Date(
-                        (Date.now() / 1e3 + offset) * 1e3
-                    );
+                    const serverTime = new Date(Date.now() + offset / 1e3);
                     displayTime(serverTime);
                 }, 1000);
 
-                serverTime = new Date((Date.now() / 1e3 + offset) * 1e3);
+                serverTime = new Date(Date.now() + offset / 1e3);
                 displayTime(serverTime);
 
                 const offsetMessage = offset < 0 ? 'ahead' : 'behind';
@@ -308,7 +306,6 @@
                     offset
                 ).toFixed(3)} seconds`; // We do have up to microsecond precision, but it's not great...
                 elems.offset.classList.add('done');
-
                 elems.time.classList.add('done');
             }
 

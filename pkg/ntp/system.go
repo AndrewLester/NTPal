@@ -24,11 +24,10 @@ func stepTime(offset float64) {
 	Sec -= unixEraOffset
 
 	info("CURRENT:", NTPTimestampToTime(systemTime), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
-	if shouldSetTime() {
-		err := settimeofday.Settimeofday(Sec, Usec)
-		if err != nil {
-			info("SETTIMEOFDAYERR:", err)
-		}
+
+	err := settimeofday.Settimeofday(Sec, Usec)
+	if err != nil {
+		info("SETTIMEOFDAYERR:", err)
 	}
 }
 
@@ -50,10 +49,8 @@ func adjustTime(offset float64) {
 		Usec += 1e6
 	}
 
-	if shouldSetTime() {
-		err := adjtime.Adjtime(Sec, Usec)
-		if err != nil {
-			info("ADJTIME ERROR:", err, "offset:", offset)
-		}
+	err := adjtime.Adjtime(Sec, Usec)
+	if err != nil {
+		info("ADJTIME ERROR:", err, "offset:", offset)
 	}
 }

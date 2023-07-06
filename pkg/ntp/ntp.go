@@ -18,7 +18,7 @@ const PORT = 123           // NTP port number
 const VERSION byte = 4     // NTP version number
 const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
 const MINPOLL int8 = 6     //minimum poll exponent (64 s)
-const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
+const MAXPOLL int8 = 16    // maximum poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
 const NOSYNC byte = 0x3    // leap unsync
@@ -696,8 +696,10 @@ func (system *NTPSystem) sendPoll(association *Association) {
 				if err != nil {
 					log.Fatal("Invalid address: ", association.hostname)
 				}
+				if association.srcaddr == addr {
+					hpoll++
+				}
 				association.srcaddr = addr
-				hpoll++
 				association.unreach = -1
 			}
 			association.unreach++
@@ -768,9 +770,20 @@ func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 		// else if (auth == A_ERROR)
 		// 		fast_xmit(r, M_SERV, A_CRYPTO);
 		// return;         /* M_SERV packet sent */
+	case NEWPS:
+		if !isSymmetricEnabled() {
+			return nil
+		}
+
+		association = &Association{
+			ReceivePacket: packet,
+			hmode:         SYMMETRIC_PASSIVE,
+			ephemeral:     true,
+		}
+		system.clear(association, INIT)
+		system.associations = append(system.associations, association)
 	case PROC:
-		break
-	case DSCRD:
+	default:
 		return nil
 	}
 
@@ -1086,6 +1099,9 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	for i := NSTAGE - 1; i > 0; i-- {
 		association.f[i] = association.f[i-1]
 		association.f[i].disp += PHI * (float64(system.clock.t) - association.t)
+		if association.f[i].disp > MAXDISP {
+			association.f[i].disp = MAXDISP
+		}
 		f[i] = association.f[i]
 	}
 	association.f[0].t = system.clock.t
@@ -1107,7 +1123,7 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	association.disp = 0
 	association.jitter = 0
 	for i := NSTAGE - 1; i >= 0; i-- {
-		association.disp += f[i].disp / math.Pow(2, float64(i+1))
+		association.disp = 0.5 * (association.disp + f[i].disp)
 		if i < m {
 			association.jitter += math.Pow((f[0].offset - f[i].offset), 2)
 		}
@@ -1443,8 +1459,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		}
 		system.reftime = association.Reftime
 		system.rootdelay = association.Rootdelay + association.delay
-		dtemp := math.Sqrt(math.Pow(association.jitter, 2) + math.Pow(system.jitter, 2))
-		dtemp += math.Max(association.disp+PHI*(float64(system.clock.t)-association.t)+
+		dtemp := math.Max(association.disp+system.jitter+PHI*(float64(system.clock.t)-association.t)+
 			math.Abs(association.offset), MINDISP)
 		system.rootdisp = association.Rootdisp + dtemp
 	/*

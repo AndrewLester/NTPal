@@ -5,10 +5,6 @@ import (
 	"os"
 )
 
-func shouldSetTime() bool {
-	return os.Getenv("ENABLED") == "1"
-}
-
 func info(args ...any) {
 	if isInfo() {
 		fmt.Println(args...)
@@ -27,4 +23,8 @@ func isInfo() bool {
 
 func isDebug() bool {
 	return os.Getenv("DEBUG") == "1"
+}
+
+func isSymmetricEnabled() bool {
+	return os.Getenv("SYMMETRIC") == "1"
 }
