@@ -45,7 +45,7 @@ const STEPT = .128     /* step threshold (s) */
 const WATCH = 600      /* stepout threshold (s) */
 const PANICT = 1000    /* panic threshold (s) */
 const PLL = 16         /* PLL loop gain */
-const FLL = 4          /* FLL loop gain */
+const FLL = 0.25       /* FLL loop gain */
 const AVG = 4          /* parameter averaging constant */
 const ALLAN = 2048     /* compromise Allan intercept (s) */
 const LIMIT = 30       /* poll-adjust threshold */
@@ -525,11 +525,7 @@ func (system *NTPSystem) clockAdjust() {
 	 * noise beyond this point and it helps to damp residual offset
 	 * at the longer poll intervals.
 	 */
-	damping := 1.0
-	if Log2ToDouble(system.poll+4) > ALLAN {
-		damping = 1.2
-	}
-	dtemp := system.clock.offset / (float64(PLL) * math.Pow(2, float64(system.poll)*damping))
+	dtemp := system.clock.offset / (float64(PLL) * Log2ToDouble(system.poll))
 	if system.clock.state != SYNC {
 		dtemp = 0
 	} else if system.hold > 0 {
@@ -672,13 +668,9 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		association.outdate = int32(system.clock.t)
 		association.reach = association.reach << 1
 
-		// & with 0b111 to check if the last 3 attempts were unsuccessful
-		if association.reach&0b111 == 0 {
-			system.clockFilter(association, 0, MAXDISP, MAXDISP)
-		}
-
 		// Unreachable
 		if association.reach == 0 {
+			system.clockFilter(association, 0, 0, MAXDISP)
 			/*
 			 * The server is unreachable, so bump the
 			 * unreach counter.  If the unreach threshold
@@ -689,7 +681,9 @@ func (system *NTPSystem) sendPoll(association *Association) {
 			 */
 			if association.iburstEnabled && association.unreach == 0 {
 				association.burst = BCOUNT
-			} else if association.unreach < UNREACH {
+			}
+
+			if association.unreach < UNREACH {
 				association.unreach++
 			} else {
 				// Try to get a new IP
@@ -701,9 +695,8 @@ func (system *NTPSystem) sendPoll(association *Association) {
 					hpoll++
 				}
 				association.srcaddr = addr
-				association.unreach = -1
+				association.unreach = 0
 			}
-			association.unreach++
 		} else {
 			/*
 			 * The server is reachable.  Set the poll
@@ -1102,10 +1095,14 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	for i := NSTAGE - 1; i > 0; i-- {
 		association.f[i] = association.f[i-1]
 		association.f[i].disp += dtemp
-		if association.f[i].disp > MAXDISP {
-			association.f[i].disp = MAXDISP
-		}
 		f[i] = association.f[i]
+		if association.f[i].disp >= MAXDISP {
+			association.f[i].disp = MAXDISP
+			f[i].delay = MAXDISP
+		} else if association.update-association.t > ALLAN {
+			f[i].delay = association.f[i].delay +
+				association.f[i].disp
+		}
 	}
 
 	association.f[0].t = system.clock.t
@@ -1466,9 +1463,9 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		}
 		system.reftime = association.Reftime
 		system.rootdelay = association.Rootdelay + association.delay
-		dtemp := math.Max(association.disp+system.jitter+PHI*(float64(system.clock.t)-association.update)+
+		dtemp := math.Max(association.Rootdisp+association.disp+system.jitter+PHI*(float64(system.clock.t)-association.update)+
 			math.Abs(association.offset), MINDISP)
-		system.rootdisp = association.Rootdisp + dtemp
+		system.rootdisp = dtemp
 		fmt.Println("Root disp calc:", association.disp, association.Rootdisp)
 	/*
 	 * Some samples are discarded while, for instance, a direct
@@ -1564,7 +1561,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		 * exceeded.
 		 */
 		case SPIK:
-			if system.hold > 0 {
+			if mu < WATCH {
 				return IGNORE
 			}
 
@@ -1818,8 +1815,8 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return math.Max(MINDISP, association.Rootdelay+association.delay)/2 +
-		association.Rootdisp + Log2ToDouble(system.precision) + Log2ToDouble(association.Precision) + PHI*float64(float64(system.clock.t)-association.update) + association.jitter
+	return (association.Rootdelay+association.delay)/2 +
+		association.Rootdisp + association.disp + PHI*float64(float64(system.clock.t)-association.update) + association.jitter
 }
 
 func containsAssociation(survivors []Survivor, association *Association) bool {
