@@ -195,6 +195,7 @@ type Association struct {
 	delay  float64             /* peer delay */
 	disp   float64             /* peer dispersion */
 	jitter float64             /* RMS jitter */
+	update float64             // clock.t of the last collected sample
 
 	/*
 	 * Poll process variables
@@ -900,8 +901,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 			packet.dst))) / 2
 		delay = math.Max(NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))-NTPTimestampDifferenceToDouble(int64(packet.Xmt-
 			packet.Rec)), Log2ToDouble(system.precision))
-		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*
-			NTPTimestampDifferenceToDouble(int64(packet.dst-packet.Org))
+		disp = Log2ToDouble(packet.Precision) + Log2ToDouble(system.precision) + PHI*delay
 	}
 
 	// Don't use this offset/delay if KoD, probably invalid
@@ -1050,6 +1050,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.Rec = 0
 	association.Xmt = 0
 	association.t = 0
+	association.update = 0
 	association.f = [NSTAGE]FilterStage{}
 	association.offset = 0
 	association.delay = 0
@@ -1079,6 +1080,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	 * broadcast server.
 	 */
 	association.t = float64(system.clock.t)
+	association.update = float64(system.clock.t)
 	association.outdate = int32(association.t)
 	association.nextdate = association.outdate + rand.Int31n(1<<MINPOLL)
 }
@@ -1095,15 +1097,17 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	 * place the (offset, delay, disp, time) in the vacated
 	 * rightmost tuple.
 	 */
-	association.disp = 0
+	dtemp := PHI * (float64(system.clock.t) - association.update)
+	association.update = float64(system.clock.t)
 	for i := NSTAGE - 1; i > 0; i-- {
 		association.f[i] = association.f[i-1]
-		association.f[i].disp += PHI * (float64(system.clock.t) - association.t)
+		association.f[i].disp += dtemp
 		if association.f[i].disp > MAXDISP {
 			association.f[i].disp = MAXDISP
 		}
 		f[i] = association.f[i]
 	}
+
 	association.f[0].t = system.clock.t
 	association.f[0].offset = offset
 	association.f[0].delay = delay
@@ -1462,6 +1466,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		dtemp := math.Max(association.disp+system.jitter+PHI*(float64(system.clock.t)-association.t)+
 			math.Abs(association.offset), MINDISP)
 		system.rootdisp = association.Rootdisp + dtemp
+		fmt.Println("Root disp calc:", association.disp, association.Rootdisp)
 	/*
 	 * Some samples are discarded while, for instance, a direct
 	 * frequency measurement is being made.
