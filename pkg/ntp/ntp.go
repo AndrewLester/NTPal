@@ -1114,7 +1114,10 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	association.f[0].disp = disp
 	f[0] = association.f[0]
 
-	sort.Sort(ByDelay{&f})
+	// If the clock has stabilized, sort the samples by delay
+	if system.hold == 0 {
+		sort.Sort(ByDelay{&f})
+	}
 
 	m := 0
 	for i := 0; i < NSTAGE; i++ {
@@ -1463,7 +1466,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 		}
 		system.reftime = association.Reftime
 		system.rootdelay = association.Rootdelay + association.delay
-		dtemp := math.Max(association.disp+system.jitter+PHI*(float64(system.clock.t)-association.t)+
+		dtemp := math.Max(association.disp+system.jitter+PHI*(float64(system.clock.t)-association.update)+
 			math.Abs(association.offset), MINDISP)
 		system.rootdisp = association.Rootdisp + dtemp
 		fmt.Println("Root disp calc:", association.disp, association.Rootdisp)
@@ -1816,7 +1819,7 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 * plus peer jitter.
 	 */
 	return math.Max(MINDISP, association.Rootdelay+association.delay)/2 +
-		association.Rootdisp + association.disp + PHI*float64(float64(system.clock.t)-association.t) + association.jitter
+		association.Rootdisp + Log2ToDouble(system.precision) + Log2ToDouble(association.Precision) + PHI*float64(float64(system.clock.t)-association.update) + association.jitter
 }
 
 func containsAssociation(survivors []Survivor, association *Association) bool {
