@@ -930,7 +930,7 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	transmitPacket.Poll = receivePacket.Poll
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = NTPShortEncoded(system.rootdelay * NTPShortLength)
-	transmitPacket.Rootdisp = NTPShortEncoded(system.rootdisp * NTPShortLength)
+	transmitPacket.Rootdisp = NTPShortEncoded(float64(0.000579 * NTPShortLength))
 	transmitPacket.Refid = system.refid
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = receivePacket.Xmt
