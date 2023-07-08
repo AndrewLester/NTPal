@@ -17,8 +17,8 @@ import (
 const PORT = 123           // NTP port number
 const VERSION byte = 4     // NTP version number
 const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 6     //minimum poll exponent (64 s)
-const MAXPOLL int8 = 16    // maximum poll exponent (36 h)
+const MINPOLL int8 = 3     //minimum poll exponent (64 s)
+const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
 const NOSYNC byte = 0x3    // leap unsync
@@ -207,6 +207,8 @@ type Association struct {
 	unreach  int
 	outdate  int32
 	nextdate int32
+	maxpoll  int8
+	minpoll  int8
 
 	hostname string
 
@@ -438,6 +440,8 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 			hmode:    associationConfig.hmode,
 			hpoll:    int8(associationConfig.minpoll),
 			hostname: associationConfig.hostname,
+			maxpoll:  int8(associationConfig.maxpoll),
+			minpoll:  int8(associationConfig.minpoll),
 			ReceivePacket: ReceivePacket{
 				srcaddr: associationConfig.address,
 				dstaddr: system.address,
@@ -1000,7 +1004,7 @@ func (system *NTPSystem) pollPeer(association *Association) {
 }
 
 func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
-	association.hpoll = int8(math.Max(math.Min(float64(MAXPOLL), float64(poll)), float64(MINPOLL)))
+	association.hpoll = int8(math.Max(math.Min(float64(association.maxpoll), float64(poll)), float64(association.minpoll)))
 	if association.burst > 0 {
 		if uint64(association.nextdate) != system.clock.t {
 			return
@@ -1057,8 +1061,8 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 
 	association.leap = NOSYNC
 	association.Stratum = MAXSTRAT
-	association.Poll = MAXPOLL
-	association.hpoll = MINPOLL
+	association.Poll = association.maxpoll
+	association.hpoll = association.minpoll
 	association.disp = MAXDISP
 	association.jitter = Log2ToDouble(system.precision)
 	association.Refid = uint32(kiss)
@@ -1075,7 +1079,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.t = float64(system.clock.t)
 	association.update = float64(system.clock.t)
 	association.outdate = int32(association.t)
-	association.nextdate = association.outdate + rand.Int31n(1<<MINPOLL)
+	association.nextdate = association.outdate + rand.Int31n(1<<association.minpoll)
 }
 
 func (system *NTPSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
@@ -1437,7 +1441,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 			system.clear(association, STEP)
 		}
 		system.stratum = MAXSTRAT
-		system.poll = MINPOLL
+		system.poll = association.minpoll
 		system.rootdelay = 0
 		system.rootdisp = 0
 		system.jitter = Log2ToDouble(system.precision)
@@ -1601,7 +1605,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			 */
 			stepTime(offset)
 			system.clock.count = 0
-			system.poll = MINPOLL
+			system.poll = association.minpoll
 			rval = LSTEP
 			// Initialize hold timer for training and startup intervals
 			if system.clock.state == NSET || system.clock.state == FSET {
@@ -1638,7 +1642,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 			// would mess up the frequency measurement in the next clock state.
 			stepTime(offset)
 			system.clock.count = 0
-			system.poll = MINPOLL
+			system.poll = association.minpoll
 			system.hold = WATCH
 			system.rstclock(FREQ, association.t, 0)
 			return LSTEP
@@ -1736,7 +1740,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		system.clock.count += int32(system.poll)
 		if system.clock.count > LIMIT {
 			system.clock.count = LIMIT
-			if system.poll < MAXPOLL {
+			if system.poll < association.maxpoll {
 				system.clock.count = 0
 				system.poll++
 			}
@@ -1745,7 +1749,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 		system.clock.count -= int32(system.poll << 1)
 		if system.clock.count < -LIMIT {
 			system.clock.count = -LIMIT
-			if system.poll > MINPOLL {
+			if system.poll > association.minpoll {
 				system.clock.count = 0
 				system.poll--
 			}
