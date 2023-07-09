@@ -174,6 +174,9 @@ type NTPSystem struct {
 	query            bool
 	filtered         chan any
 	ProgressFiltered chan any
+
+	// RPC
+	socket string
 }
 
 type Association struct {
@@ -327,11 +330,12 @@ type TransmitPacket struct {
 	NTPFieldsEncoded
 }
 
-func NewNTPSystem(host, port, config, drift string) *NTPSystem {
+func NewNTPSystem(host, port, config, drift, socket string) *NTPSystem {
 	return &NTPSystem{
 		host:             host,
 		port:             port,
 		config:           config,
+		socket:           socket,
 		drift:            drift,
 		mode:             SERVER,
 		leap:             NOSYNC,
@@ -429,6 +433,11 @@ func (system *NTPSystem) Start() {
 
 		system.wg.Add(1)
 		go system.setupServer()
+
+		rpcServer := &RPCServer{Socket: system.socket, System: system}
+
+		system.wg.Add(1)
+		go rpcServer.Listen()
 	}
 
 	system.wg.Wait()

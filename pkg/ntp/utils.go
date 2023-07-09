@@ -1,19 +1,19 @@
 package ntp
 
 import (
-	"fmt"
+	"log"
 	"os"
 )
 
 func info(args ...any) {
 	if isInfo() {
-		fmt.Println(args...)
+		log.Println(args...)
 	}
 }
 
 func debug(args ...any) {
 	if isDebug() {
-		fmt.Println(args...)
+		log.Println(args...)
 	}
 }
 

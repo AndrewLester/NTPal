@@ -22,7 +22,7 @@ func handleQueryCommand(system *ntp.NTPSystem, query string) {
 }
 
 var (
-	textStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render
+	textStyle = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(lipgloss.Color("252")).Render
 	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render
 )
 
@@ -104,7 +104,7 @@ func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m queryCommandModel) View() (s string) {
 	if result == "" {
-		s += textStyle("NTPal - Query\n\n")
+		s += textStyle("NTPal - Query") + "\n\n"
 		s += m.progress.ViewAs(percentage) + "\n\n"
 		s += helpStyle("q: exit\n")
 	} else {

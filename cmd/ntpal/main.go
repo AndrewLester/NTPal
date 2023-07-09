@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/AndrewLester/ntpal/pkg/ntp"
 	"github.com/sevlyar/go-daemon"
@@ -14,16 +15,21 @@ import (
 const defaultConfigPath = "/etc/ntp.conf"
 const defaultDriftPath = "/etc/ntp.drift"
 
+var socketPath = fmt.Sprintf("/var/%s.sock", daemonName)
+
 func main() {
 	var config string
 	var drift string
 	var query string
 	var noDaemon bool
+	var stop bool
 	flag.StringVar(&config, "config", defaultConfigPath, "Path to the NTP config file.")
 	flag.StringVar(&drift, "drift", defaultDriftPath, "Path to the NTP drift file.")
 	flag.StringVar(&query, "query", "", "Address to query.")
 	flag.StringVar(&query, "q", query, "Address to query.")
 	flag.BoolVar(&noDaemon, "no-daemon", false, "Don't run ntpal as a daemon.")
+	flag.BoolVar(&stop, "stop", false, "Stop the ntpal daemon.")
+	flag.BoolVar(&stop, "s", stop, "Stop the ntpal daemon.")
 	flag.Parse()
 
 	port := os.Getenv("NTP_PORT")
@@ -39,29 +45,33 @@ func main() {
 		host = "0.0.0.0"
 	}
 
-	system := ntp.NewNTPSystem(host, port, config, drift)
+	system := ntp.NewNTPSystem(host, port, config, drift, socketPath)
 
 	if query != "" {
 		handleQueryCommand(system, query)
 	} else {
 		if !noDaemon {
-			d, err := daemonCtx.Reborn()
+			process, err := daemonCtx.Reborn()
 			if err != nil {
 				if errors.Is(err, daemon.ErrWouldBlock) {
-					killDaemon()
-					fmt.Println("Successfully stopped ntpal daemon.")
+					handleNTPalUI(socketPath)
 					return
 				}
 				log.Fatal("Unable to run: ", err)
 			}
-			if d != nil {
-				fmt.Printf("Daemon process (ntpald, %d) started successfully.\n", d.Pid)
+			if process != nil {
+				fmt.Printf("Daemon process (ntpald) started successfully with PID: %d\n", process.Pid)
 				return
 			}
 			defer daemonCtx.Release()
 
-			log.Print("- - - - - - - - - - - - - - -")
-			log.Print("daemon started", os.Args)
+			log.Print(strings.Repeat("*", 20))
+			log.Print("ntpald started", os.Args)
+		} else {
+			process, _ := daemonCtx.Search()
+			if process != nil {
+				log.Fatal("Stop the ntpal daemon via `ntpal -s` before running in no-daemon mode.")
+			}
 		}
 
 		system.Start()

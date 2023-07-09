@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"syscall"
 
 	"github.com/sevlyar/go-daemon"
@@ -23,17 +22,12 @@ var daemonCtx = &daemon.Context{
 }
 
 func killDaemon() {
-	data, err := os.ReadFile(daemonCtx.PidFileName)
+	daemon, err := daemonCtx.Search()
 	if err != nil {
-		log.Fatal("Error reading PID file.")
+		log.Fatalf("Error finding daemon: %v", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		log.Fatal("Error reading PID file.")
-	}
-
-	err = syscall.Kill(pid, syscall.SIGTERM)
+	err = syscall.Kill(daemon.Pid, syscall.SIGTERM)
 	if err != nil {
 		log.Fatal("Couldn't stop ntpal daemon.")
 	}
