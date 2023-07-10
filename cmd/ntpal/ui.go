@@ -16,7 +16,7 @@ func handleNTPalUI(socket string) {
 	m := ntpalUIModel{socket: socket, table: setupTable()}
 
 	if _, err := tea.NewProgram(m).Run(); err != nil {
-		log.Fatalf("could not run program: %v", err)
+		log.Fatal(err)
 	}
 }
 
@@ -124,7 +124,7 @@ func (m ntpalUIModel) View() (s string) {
 	if m.daemonKillStatus != "" {
 		s += m.daemonKillStatus + "\n"
 	} else {
-		s += helpStyle("q: exit\n")
+		s += helpStyle("q: exit, s: stop daemon\n")
 	}
 	return
 }

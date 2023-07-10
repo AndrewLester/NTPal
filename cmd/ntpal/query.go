@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
+	"os"
 	"strconv"
 
+	"github.com/AndrewLester/ntpal/internal/sugar"
 	"github.com/AndrewLester/ntpal/pkg/ntp"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,8 +17,9 @@ func handleQueryCommand(system *ntp.NTPSystem, query string) {
 	m := queryCommandModel{system: system, address: query}
 	m.resetProgress()
 
-	if _, err := tea.NewProgram(m).Run(); err != nil {
-		log.Fatalf("could not run program: %v", err)
+	if _, err := sugar.RunProgramWithErrors(m); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -40,23 +42,25 @@ type queryCommandModel struct {
 	progress progress.Model
 	system   *ntp.NTPSystem
 	address  string
+	err      error
 }
 
 type ntpQueryMessage string
+type ntpQueryError error
 type progressUpdateMessage struct{}
 
 func ntpQueryCommand(system *ntp.NTPSystem, address string) tea.Cmd {
 	return func() tea.Msg {
-		offset, err := system.Query(address, messages)
-		if err >= 16 {
-			return ntpQueryMessage("Server did not respond.")
+		result, err := system.Query(address, messages)
+		if err != nil {
+			return ntpQueryError(err)
 		}
 
-		offsetString := strconv.FormatFloat(offset, 'G', 5, 64)
-		if offset > 0 {
+		offsetString := strconv.FormatFloat(result.Offset, 'G', 5, 64)
+		if result.Offset > 0 {
 			offsetString = "+" + offsetString
 		}
-		delayString := strconv.FormatFloat(err, 'G', 5, 64)
+		delayString := strconv.FormatFloat(result.Err, 'G', 5, 64)
 		addr, _ := net.ResolveIPAddr("ip", address)
 		return ntpQueryMessage(fmt.Sprint(offsetString, " +/- ", delayString, " ", address, " ", addr.String()))
 	}
@@ -97,12 +101,19 @@ func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ntpQueryMessage:
 		result = string(msg)
 		return m, tea.Quit
+	case ntpQueryError:
+		m.err = msg
+		return m, tea.Quit
 	default:
 		return m, nil
 	}
 }
 
 func (m queryCommandModel) View() (s string) {
+	if m.err != nil {
+		return
+	}
+
 	if result == "" {
 		s += textStyle("NTPal - Query") + "\n\n"
 		s += m.progress.ViewAs(percentage) + "\n\n"
@@ -111,4 +122,8 @@ func (m queryCommandModel) View() (s string) {
 		s += result + "\n"
 	}
 	return
+}
+
+func (m queryCommandModel) GetError() error {
+	return m.err
 }

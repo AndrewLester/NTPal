@@ -57,6 +57,10 @@ func main() {
 					handleNTPalUI(socketPath)
 					return
 				}
+				if errors.Is(err, os.ErrPermission) {
+					log.Fatal("You do not have permission to start the daemon. Try re-running with sudo.")
+					return
+				}
 				log.Fatal("Unable to run: ", err)
 			}
 			if process != nil {

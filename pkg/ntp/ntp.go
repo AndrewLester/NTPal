@@ -347,60 +347,6 @@ func NewNTPSystem(host, port, config, drift, socket string) *NTPSystem {
 	}
 }
 
-func (system *NTPSystem) Query(address string, messages int) (float64, float64) {
-	system.query = true
-
-	rand.Seed(time.Now().UnixNano())
-
-	hostAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(system.host, system.port))
-	if err != nil {
-		log.Fatal("Could not resolve NTP_HOST + NTP_PORT")
-	}
-	system.address = hostAddr
-
-	addr, err := net.ResolveUDPAddr("udp", address+":123")
-	if err != nil {
-		log.Fatal("Invalid address: ", address)
-	}
-	association := &Association{
-		hmode: CLIENT,
-		hpoll: 0,
-		ReceivePacket: ReceivePacket{
-			srcaddr: addr,
-			dstaddr: system.address,
-			version: VERSION,
-			keyid:   0,
-		},
-	}
-	system.clear(association, INIT)
-	system.associations = append(system.associations, association)
-
-	system.listen()
-	go system.setupServer()
-
-	for i := 0; i < messages; i++ {
-		system.pollPeer(association)
-		select {
-		case <-system.filtered:
-			system.ProgressFiltered <- 0
-		case <-time.After(time.Duration(1) * time.Second):
-			system.ProgressFiltered <- 0
-		}
-	}
-
-	minDelayStage := association.f[0]
-	for _, stage := range association.f {
-		if stage.delay < minDelayStage.delay {
-			minDelayStage = stage
-		}
-	}
-
-	// lambda is error in a given sample's offset
-	lambda := association.Rootdelay/2 + association.Rootdisp + minDelayStage.delay
-
-	return minDelayStage.offset, lambda
-}
-
 func (system *NTPSystem) Start() {
 	config := ParseConfig(system.config)
 
@@ -867,9 +813,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 
 	// Server must be synchronized with valid stratum
 	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
-		if system.query {
-			log.Fatal("Server is not synchronized.")
-		}
+		system.filtered <- 0
 		return
 	}
 
