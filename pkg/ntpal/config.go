@@ -1,4 +1,4 @@
-package ntp
+package ntpal
 
 import (
 	"bufio"
@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-type NTPConfig struct {
+type ntpConfig struct {
 	driftfile string
-	servers   []ServerAssociationConfig
+	servers   []serverAssociationConfig
 }
 
-type ServerAssociationConfig struct {
+type serverAssociationConfig struct {
 	address  *net.UDPAddr
 	hostname string
 	burst    bool
@@ -28,10 +28,10 @@ type ServerAssociationConfig struct {
 	hmode    Mode
 }
 
-const DEFAULT_MINPOLL = 6
-const DEFAULT_MAXPOLL = 10
+const defaultMinpoll = 6
+const defaultMaxpoll = 10
 
-func ParseConfig(path string) NTPConfig {
+func parseConfig(path string) NTPConfig {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("File at", path, "could not be read for configuration:", err)
@@ -64,8 +64,8 @@ func ParseConfig(path string) NTPConfig {
 			prefer := optionalArgument("prefer", &arguments)
 			key := integerArgument("key", -1, &arguments)
 			version := integerArgument("version", 4, &arguments)
-			minpoll := integerArgument("minpoll", DEFAULT_MINPOLL, &arguments)
-			maxpoll := integerArgument("maxpoll", DEFAULT_MAXPOLL, &arguments)
+			minpoll := integerArgument("minpoll", defaultMinpoll, &arguments)
+			maxpoll := integerArgument("maxpoll", defaultMaxpoll, &arguments)
 
 			if len(arguments) > 2 {
 				configParseError("Invalid arguments supplied to command. One was: \"", arguments[2], "\"")
@@ -159,7 +159,7 @@ func stringArgument(name string, initial string, arguments *[]string) string {
 	return initial
 }
 
-func RemoveIndex[T any](s *[]T, index int) {
+func removeIndex[T any](s *[]T, index int) {
 	ret := make([]T, 0)
 	ret = append(ret, (*s)[:index]...)
 	ret = append(ret, (*s)[index+1:]...)

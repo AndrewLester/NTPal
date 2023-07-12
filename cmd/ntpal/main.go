@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/AndrewLester/ntpal/pkg/ntp"
+	"github.com/AndrewLester/ntpal/pkg/ntpal"
 	"github.com/sevlyar/go-daemon"
 )
 
@@ -45,7 +45,7 @@ func main() {
 		host = "0.0.0.0"
 	}
 
-	system := ntp.NewNTPSystem(host, port, config, drift, socketPath)
+	system := ntp.NewSystem(host, port, config, drift, socketPath)
 
 	if query != "" {
 		handleQueryCommand(system, query)

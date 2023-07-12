@@ -1,4 +1,4 @@
-package ntp
+package ntpal
 
 import (
 	"errors"
@@ -20,15 +20,13 @@ var (
 func (system *NTPSystem) Query(address string, messages int) (*QueryResult, error) {
 	system.query = true
 
-	rand.Seed(time.Now().UnixNano())
-
 	hostAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(system.host, system.port))
 	if err != nil {
 		return nil, err
 	}
 	system.address = hostAddr
 
-	addr, err := net.ResolveUDPAddr("udp", address+":123")
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(address, PORT))
 	if err != nil {
 		return nil, err
 	}
@@ -59,9 +57,9 @@ func (system *NTPSystem) Query(address string, messages int) (*QueryResult, erro
 			}
 
 			responded = true
-			system.ProgressFiltered <- 0
+			system.FilteredProgress <- 0
 		case <-time.After(time.Duration(1) * time.Second):
-			system.ProgressFiltered <- 0
+			system.FilteredProgress <- 0
 		}
 	}
 

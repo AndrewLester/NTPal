@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/AndrewLester/ntpal/internal/ui"
 	"github.com/AndrewLester/ntpal/pkg/ntp"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,10 +21,6 @@ func handleNTPalUI(socket string) {
 	}
 }
 
-var baseStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
-
 const fetchInfoPeriod = time.Second * 5
 
 type ntpalUIModel struct {
@@ -37,7 +34,7 @@ type ntpalUIModel struct {
 var client *rpc.Client
 
 type dialSocketMessage *rpc.Client
-type fetchInfoMessage []*ntp.RPCAssociation
+type fetchInfoMessage []*ntp.Association
 type tickMsg time.Time
 
 func dialSocketCommand(m ntpalUIModel) tea.Cmd {
@@ -53,11 +50,12 @@ func dialSocketCommand(m ntpalUIModel) tea.Cmd {
 
 func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 	return func() tea.Msg {
-		var reply []*ntp.RPCAssociation
-		err := client.Call("RPCServer.FetchInfo", 0, &reply)
+		var reply []*ntp.Association
+		err := client.Call("RPCServer.FetchAssociations", 0, &reply)
 		if err != nil {
 			log.Fatalf("Error getting info from daemon: %v", err)
 		}
+
 		return fetchInfoMessage(reply)
 	}
 }
@@ -97,6 +95,7 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
@@ -107,7 +106,13 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.associations = msg
 		rows := []table.Row{}
 		for _, association := range m.associations {
-			rows = append(rows, table.Row{association.SrcAddr.IP.String(), strconv.FormatFloat(association.Offset, 'G', 5, 64)})
+			row := table.Row{
+				association.Srcaddr.IP.String(),
+				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
+				association.Reach,
+				association.,
+			}
+			rows = append(rows, row)
 		}
 		m.table.SetRows(rows)
 		return m, nil
@@ -119,12 +124,12 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ntpalUIModel) View() (s string) {
-	s += textStyle("NTPal") + "\n\n"
-	s += baseStyle.Render(m.table.View()) + "\n\n"
+	s += ui.Text("NTPal") + "\n"
+	s += ui.TableBase(m.table.View()) + "\n\n"
 	if m.daemonKillStatus != "" {
 		s += m.daemonKillStatus + "\n"
 	} else {
-		s += helpStyle("q: exit, s: stop daemon\n")
+		s += ui.Help("q: exit, s: stop daemon") + "\n"
 	}
 	return
 }
@@ -132,7 +137,9 @@ func (m ntpalUIModel) View() (s string) {
 func setupTable() table.Model {
 	columns := []table.Column{
 		{Title: "Address", Width: 20},
-		{Title: "Offset", Width: 15},
+		{Title: "Offset (ms)", Width: 15},
+		{Title: "Reach", Width: 15}
+		{Title: "Error", Width: 15}
 	}
 
 	t := table.New(
@@ -144,12 +151,12 @@ func setupTable() table.Model {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(ui.TableGray).
 		BorderBottom(true).
 		Bold(true)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
+		Foreground(lipgloss.Color("218")).
+		Background(lipgloss.Color("70")).
 		Bold(false)
 	t.SetStyles(s)
 

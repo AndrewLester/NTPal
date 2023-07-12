@@ -7,15 +7,16 @@ import (
 	"strconv"
 
 	"github.com/AndrewLester/ntpal/internal/sugar"
-	"github.com/AndrewLester/ntpal/pkg/ntp"
+	"github.com/AndrewLester/ntpal/internal/ui"
+	"github.com/AndrewLester/ntpal/pkg/ntpal"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func handleQueryCommand(system *ntp.NTPSystem, query string) {
-	m := queryCommandModel{system: system, address: query}
-	m.resetProgress()
+func handleQueryCommand(system *ntp.NTPalSystem, query string, messages int) {
+	m := queryCommandModel{system: system, address: query, messages: messages}
+	m.progress = progress.New(progress.WithScaledGradient("#68b1b1", "#6ea4ff"))
 
 	if _, err := sugar.RunProgramWithErrors(m); err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -23,17 +24,10 @@ func handleQueryCommand(system *ntp.NTPSystem, query string) {
 	}
 }
 
-var (
-	textStyle = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(lipgloss.Color("252")).Render
-	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render
-)
-
 const (
 	padding  = 10
 	maxWidth = 80
 )
-
-const messages = 5
 
 var percentage float64 = 0
 var result string
@@ -41,6 +35,7 @@ var result string
 type queryCommandModel struct {
 	progress progress.Model
 	system   *ntp.NTPSystem
+	messages int
 	address  string
 	err      error
 }
@@ -49,9 +44,9 @@ type ntpQueryMessage string
 type ntpQueryError error
 type progressUpdateMessage struct{}
 
-func ntpQueryCommand(system *ntp.NTPSystem, address string) tea.Cmd {
+func ntpQueryCommand(m queryCommandModel) tea.Cmd {
 	return func() tea.Msg {
-		result, err := system.Query(address, messages)
+		result, err := m.system.Query(m.address, m.messages)
 		if err != nil {
 			return ntpQueryError(err)
 		}
@@ -61,24 +56,20 @@ func ntpQueryCommand(system *ntp.NTPSystem, address string) tea.Cmd {
 			offsetString = "+" + offsetString
 		}
 		delayString := strconv.FormatFloat(result.Err, 'G', 5, 64)
-		addr, _ := net.ResolveIPAddr("ip", address)
-		return ntpQueryMessage(fmt.Sprint(offsetString, " +/- ", delayString, " ", address, " ", addr.String()))
+		addr, _ := net.ResolveIPAddr("ip", m.address)
+		return ntpQueryMessage(fmt.Sprint(offsetString, " +/- ", delayString, " ", m.address, " ", addr.String()))
 	}
 }
 
 func filterListenCommand(m queryCommandModel) tea.Cmd {
 	return func() tea.Msg {
-		<-m.system.ProgressFiltered
+		<-m.system.FilteredProgress
 		return progressUpdateMessage{}
 	}
 }
 
-func (m *queryCommandModel) resetProgress() {
-	m.progress = progress.New(progress.WithScaledGradient("#68b1b1", "#6ea4ff"))
-}
-
 func (m queryCommandModel) Init() tea.Cmd {
-	return tea.Batch(ntpQueryCommand(m.system, m.address), filterListenCommand(m))
+	return tea.Batch(ntpQueryCommand(m), filterListenCommand(m))
 }
 
 func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,9 +106,9 @@ func (m queryCommandModel) View() (s string) {
 	}
 
 	if result == "" {
-		s += textStyle("NTPal - Query") + "\n\n"
+		s += ui.Title("NTPal - Query") + "\n"
 		s += m.progress.ViewAs(percentage) + "\n\n"
-		s += helpStyle("q: exit\n")
+		s += ui.Help("q: exit") + "\n"
 	} else {
 		s += result + "\n"
 	}

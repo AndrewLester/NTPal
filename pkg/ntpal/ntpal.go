@@ -1,4 +1,4 @@
-package ntp
+package ntpal
 
 import (
 	"encoding/binary"
@@ -12,6 +12,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/AndrewLester/ntpal/internal/ntp"
+	"github.com/AndrewLester/ntpal/internal/rpc"
 )
 
 const PORT = 123           // NTP port number
@@ -133,7 +136,7 @@ type NTPShortEncoded = uint32
 
 type Digest = uint32
 
-type NTPSystem struct {
+type NTPalSystem struct {
 	address   *net.UDPAddr
 	t         NTPTimestampEncoded /* update time */
 	leap      byte                /* leap indicator */
@@ -173,17 +176,16 @@ type NTPSystem struct {
 
 	query            bool
 	filtered         chan any
-	ProgressFiltered chan any
+	FilteredProgress chan any
 
 	// RPC
 	socket string
 }
 
 type Association struct {
-	leap  byte /* leap indicator */
 	hmode Mode // HOST (Self) mode
-	// Values set by received packet
-	ReceivePacket
+
+	ntp.Association
 
 	// Override Rootdelay and Rootdisp to make them floats
 	Rootdelay float64
@@ -194,7 +196,6 @@ type Association struct {
 	 */
 	t      float64             /* clock.t of last used sample */
 	f      [NSTAGE]FilterStage /* clock filter */
-	offset float64             /* peer offset */
 	delay  float64             /* peer delay */
 	disp   float64             /* peer dispersion */
 	jitter float64             /* RMS jitter */
@@ -204,7 +205,6 @@ type Association struct {
 	 * Poll process variables
 	 */
 	hpoll    int8
-	reach    byte
 	burst    int
 	ttl      int
 	unreach  int
@@ -293,45 +293,8 @@ func (s ByDelay) Less(i, j int) bool {
 	return s.FilterStages[i].delay < s.FilterStages[j].delay
 }
 
-// Fields that can be read directly from the packet bytes
-type NTPFieldsEncoded struct {
-	Stratum   byte                /* stratum */
-	Poll      int8                /* poll interval */
-	Precision int8                /* precision */
-	Rootdelay NTPShortEncoded     /* root delay */
-	Rootdisp  NTPShortEncoded     /* root dispersion */
-	Refid     NTPShortEncoded     /* reference ID */
-	Reftime   NTPTimestampEncoded /* reference time */
-	Org       NTPTimestampEncoded /* origin timestamp */
-	Rec       NTPTimestampEncoded /* receive timestamp */
-	Xmt       NTPTimestampEncoded /* transmit timestamp */
-}
-
-type ReceivePacket struct {
-	srcaddr *net.UDPAddr        /* source (remote) address */
-	dstaddr *net.UDPAddr        /* destination (local) address */
-	leap    byte                /* leap indicator */
-	version byte                /* version number */
-	mode    Mode                /* mode */
-	keyid   int32               /* key ID */
-	mac     Digest              /* message digest */
-	dst     NTPTimestampEncoded /* destination timestamp */
-	NTPFieldsEncoded
-}
-
-type TransmitPacket struct {
-	dstaddr *net.UDPAddr /* source (local) address */
-	srcaddr *net.UDPAddr /* destination (remote) address */
-	leap    byte         /* leap indicator */
-	version byte         /* version number */
-	mode    Mode         /* mode */
-	keyid   int          /* key ID */
-	dgst    Digest       /* message digest */
-	NTPFieldsEncoded
-}
-
-func NewNTPSystem(host, port, config, drift, socket string) *NTPSystem {
-	return &NTPSystem{
+func NewSystem(host, port, config, drift, socket string) *NTPalSystem {
+	return &NTPalSystem{
 		host:             host,
 		port:             port,
 		config:           config,
@@ -343,12 +306,12 @@ func NewNTPSystem(host, port, config, drift, socket string) *NTPSystem {
 		precision:        PRECISION,
 		hold:             WATCH,
 		filtered:         make(chan any),
-		ProgressFiltered: make(chan any),
+		FilteredProgress: make(chan any),
 	}
 }
 
-func (system *NTPSystem) Start() {
-	config := ParseConfig(system.config)
+func (system *NTPalSystem) Start() {
+	config := parseConfig(system.config)
 
 	if system.drift == "" {
 		system.drift = config.driftfile
@@ -380,7 +343,7 @@ func (system *NTPSystem) Start() {
 		system.wg.Add(1)
 		go system.setupServer()
 
-		rpcServer := &RPCServer{Socket: system.socket, System: system}
+		rpcServer := &rpc.NTPalRPCServer{Socket: system.socket, System: system}
 
 		system.wg.Add(1)
 		go rpcServer.Listen()
@@ -389,7 +352,7 @@ func (system *NTPSystem) Start() {
 	system.wg.Wait()
 }
 
-func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociationConfig) {
+func (system *NTPalSystem) setupAssociations(associationConfigs []serverAssociationConfig) {
 	for _, associationConfig := range associationConfigs {
 		association := &Association{
 			hmode:    associationConfig.hmode,
@@ -397,7 +360,7 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 			hostname: associationConfig.hostname,
 			maxpoll:  int8(associationConfig.maxpoll),
 			minpoll:  int8(associationConfig.minpoll),
-			ReceivePacket: ReceivePacket{
+			ReceivePacket: ntp.ReceivePacket{
 				srcaddr: associationConfig.address,
 				dstaddr: system.address,
 				version: byte(associationConfig.version),
@@ -422,7 +385,7 @@ func (system *NTPSystem) setupAssociations(associationConfigs []ServerAssociatio
 	}()
 }
 
-func (system *NTPSystem) listen() {
+func (system *NTPalSystem) listen() {
 	udp, err := net.ListenUDP("udp", system.address)
 	if err != nil {
 		log.Fatalf("can't listen on %v/udp: %s", system.address, err)
@@ -431,7 +394,7 @@ func (system *NTPSystem) listen() {
 	system.conn = udp
 }
 
-func (system *NTPSystem) setupServer() {
+func (system *NTPalSystem) setupServer() {
 	defer system.wg.Done()
 
 	packet := make([]byte, MTU)
@@ -447,7 +410,7 @@ func (system *NTPSystem) setupServer() {
 			continue
 		}
 
-		recvPacket, err := decodeRecvPacket(packet, addr, system.conn)
+		recvPacket, err := ntp.DecodeRecvPacket(packet, addr, system.conn)
 		if err != nil {
 			log.Printf("Error reading packet: %v", err)
 		}
@@ -456,14 +419,14 @@ func (system *NTPSystem) setupServer() {
 		if reply == nil {
 			continue
 		}
-		encoded := encodeTransmitPacket(*reply)
+		encoded := ntp.EncodeTransmitPacket(*reply)
 		n, e := system.conn.WriteTo(encoded, addr)
 		info("(Reply) Bytes written:", n, "Err:", e)
 	}
 
 }
 
-func (system *NTPSystem) clockAdjust() {
+func (system *NTPalSystem) clockAdjust() {
 	/*
 	 * Update the process time c.t.  Also increase the dispersion
 	 * since the last update.  In contrast to NTPv3, NTPv4 does not
@@ -511,7 +474,7 @@ func (system *NTPSystem) clockAdjust() {
 	 */
 	for _, association := range system.associations {
 		if system.clock.t >= uint64(association.nextdate) {
-			info("sendPoll:", association.srcaddr.IP)
+			info("sendPoll:", association.Srcaddr.IP)
 			system.sendPoll(association)
 		}
 	}
@@ -553,18 +516,18 @@ func (system *NTPSystem) clockAdjust() {
 				refid = string(ip)
 			}
 			sync := "SYNC"
-			if association.leap == NOSYNC {
+			if association.Leap == NOSYNC {
 				sync = "NOSYNC"
 			}
 			info(
-				"("+association.srcaddr.IP.String()+"):",
+				"("+association.Srcaddr.IP.String()+"):",
 				sync,
 				"POLL:", strconv.Itoa(int(Log2ToDouble(association.Poll)))+"s",
 				"hPOLL:", strconv.Itoa(int(Log2ToDouble(association.Poll)))+"s",
 				"STRATUM:", association.Stratum,
 				"REFID:", refid,
-				"OFFSET:", association.offset,
-				"REACH:", strconv.FormatInt(int64(association.reach), 2),
+				"OFFSET:", association.Offset,
+				"REACH:", strconv.FormatInt(int64(association.Reach), 2),
 				"UNREACH:", association.unreach,
 				"TIME FILTERED:", association.t,
 			)
@@ -572,7 +535,7 @@ func (system *NTPSystem) clockAdjust() {
 	}
 }
 
-func (system *NTPSystem) sendPoll(association *Association) {
+func (system *NTPalSystem) sendPoll(association *Association) {
 	/*
 	 * This routine is called when the current time c.t catches up
 	 * to the next poll time p->nextdate.  The value p->outdate is
@@ -625,10 +588,10 @@ func (system *NTPSystem) sendPoll(association *Association) {
 		 */
 
 		association.outdate = int32(system.clock.t)
-		association.reach = association.reach << 1
+		association.Reach = association.Reach << 1
 
 		// Unreachable
-		if association.reach == 0 {
+		if association.Reach == 0 {
 			system.clockFilter(association, 0, 0, MAXDISP)
 			/*
 			 * The server is unreachable, so bump the
@@ -650,10 +613,10 @@ func (system *NTPSystem) sendPoll(association *Association) {
 				if err != nil {
 					log.Fatal("Invalid address: ", association.hostname)
 				}
-				if association.srcaddr == addr {
+				if association.Srcaddr == addr {
 					hpoll++
 				}
-				association.srcaddr = addr
+				association.Srcaddr = addr
 				association.unreach = 0
 			}
 		} else {
@@ -685,7 +648,7 @@ func (system *NTPSystem) sendPoll(association *Association) {
 	system.pollUpdate(association, hpoll)
 }
 
-func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
+func (system *NTPalSystem) receive(packet ntp.ReceivePacket) *ntp.TransmitPacket {
 	if packet.version > VERSION {
 		return nil
 	}
@@ -768,14 +731,14 @@ func (system *NTPSystem) receive(packet ReceivePacket) *TransmitPacket {
 	return nil
 }
 
-func (system *NTPSystem) process(association *Association, packet ReceivePacket) {
+func (system *NTPalSystem) process(association *Association, packet ntp.ReceivePacket) {
 	var offset float64 /* sample offsset */
 	var delay float64  /* sample delay */
 	var disp float64   /* sample dispersion */
 
 	kod := false
 
-	association.leap = packet.leap
+	association.Leap = packet.leap
 	association.Poll = packet.Poll
 	if packet.Stratum == 0 {
 		association.Stratum = MAXSTRAT
@@ -812,7 +775,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	association.Reftime = packet.Reftime
 
 	// Server must be synchronized with valid stratum
-	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
+	if association.Leap == NOSYNC || association.Stratum >= MAXSTRAT {
 		system.filtered <- 0
 		return
 	}
@@ -824,7 +787,7 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 	}
 
 	system.pollUpdate(association, association.hpoll)
-	association.reach |= 1
+	association.Reach |= 1
 
 	/*
 	 * Calculate offset, delay and dispersion, then pass to the
@@ -864,8 +827,8 @@ func (system *NTPSystem) process(association *Association, packet ReceivePacket)
 }
 
 // TODO: Add auth
-func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *TransmitPacket {
-	var transmitPacket TransmitPacket
+func (system *NTPalSystem) reply(receivePacket ntp.ReceivePacket, mode Mode) *ntp.TransmitPacket {
+	var transmitPacket ntp.TransmitPacket
 
 	transmitPacket.version = receivePacket.version
 	transmitPacket.srcaddr = receivePacket.dstaddr
@@ -905,17 +868,17 @@ func (system *NTPSystem) reply(receivePacket ReceivePacket, mode Mode) *Transmit
 	return &transmitPacket
 }
 
-func (system *NTPSystem) pollPeer(association *Association) {
-	var transmitPacket TransmitPacket
+func (system *NTPalSystem) pollPeer(association *Association) {
+	var transmitPacket ntp.TransmitPacket
 
 	/*
 	 * Initialize header and transmit timestamp
 	 */
-	transmitPacket.srcaddr = association.dstaddr
-	transmitPacket.dstaddr = association.srcaddr
-	transmitPacket.leap = system.leap
-	transmitPacket.version = association.version
-	transmitPacket.mode = association.hmode
+	transmitPacket.Srcaddr = association.Dstaddr
+	transmitPacket.Dstaddr = association.Srcaddr
+	transmitPacket.Leap = system.leap
+	transmitPacket.Version = association.version
+	transmitPacket.Mode = association.hmode
 	if system.stratum == MAXSTRAT {
 		transmitPacket.Stratum = 0
 	} else {
@@ -950,13 +913,13 @@ func (system *NTPSystem) pollPeer(association *Association) {
 	transmitPacket.Xmt = GetSystemTime()
 	association.Xmt = transmitPacket.Xmt
 
-	_, err := system.conn.WriteTo(encodeTransmitPacket(transmitPacket), transmitPacket.dstaddr)
+	_, err := system.conn.WriteTo(ntp.EncodeTransmitPacket(transmitPacket), transmitPacket.dstaddr)
 	if err != nil {
 		fmt.Println("Error", err)
 	}
 }
 
-func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
+func (system *NTPalSystem) pollUpdate(association *Association, poll int8) {
 	association.hpoll = int8(math.Max(math.Min(float64(association.maxpoll), float64(poll)), float64(association.minpoll)))
 	if association.burst > 0 {
 		if uint64(association.nextdate) != system.clock.t {
@@ -976,7 +939,7 @@ func (system *NTPSystem) pollUpdate(association *Association, poll int8) {
 	}
 }
 
-func (system *NTPSystem) clear(association *Association, kiss AssociationStateCode) {
+func (system *NTPalSystem) clear(association *Association, kiss AssociationStateCode) {
 	/*
 	 * The first thing to do is return all resources to the bank.
 	 * Typical resources are not detailed here, but they include
@@ -1002,17 +965,17 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.t = 0
 	association.update = 0
 	association.f = [NSTAGE]FilterStage{}
-	association.offset = 0
+	association.Offset = 0
 	association.delay = 0
 	association.disp = 0
 	association.jitter = 0
 	association.hpoll = 0
 	association.burst = 0
-	association.reach = 0
+	association.Reach = 0
 	association.unreach = 0
 	association.ttl = 0
 
-	association.leap = NOSYNC
+	association.Leap = NOSYNC
 	association.Stratum = MAXSTRAT
 	association.Poll = association.maxpoll
 	association.hpoll = association.minpoll
@@ -1035,7 +998,7 @@ func (system *NTPSystem) clear(association *Association, kiss AssociationStateCo
 	association.nextdate = association.outdate + rand.Int31n(1<<association.minpoll)
 }
 
-func (system *NTPSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
+func (system *NTPalSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
 	var f FilterStages
 
 	/*
@@ -1095,8 +1058,8 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 		return
 	}
 
-	etemp := math.Abs(association.offset - f[0].offset)
-	association.offset = f[0].offset
+	etemp := math.Abs(association.Offset - f[0].offset)
+	association.Offset = f[0].offset
 	association.delay = f[0].delay
 	if m > 1 {
 		association.jitter /= float64(m - 1)
@@ -1135,7 +1098,7 @@ func (system *NTPSystem) clockFilter(association *Association, offset float64, d
 	}
 }
 
-func (system *NTPSystem) clockSelect() {
+func (system *NTPalSystem) clockSelect() {
 	/*
 	 * We first cull the falsetickers from the server population,
 	 * leaving only the truechimers.  The correctness interval for
@@ -1155,24 +1118,24 @@ func (system *NTPSystem) clockSelect() {
 	system.m = []Chime{}
 	for _, association := range system.associations {
 		if !system.fit(association) {
-			info("Association unfit:", association.srcaddr.IP)
+			info("Association unfit:", association.Srcaddr.IP)
 			continue
 		}
 
 		system.m = append(system.m, Chime{
 			association: association,
 			levelType:   -1,
-			edge:        association.offset - system.rootDist(association),
+			edge:        association.Offset - system.rootDist(association),
 		})
 		system.m = append(system.m, Chime{
 			association: association,
 			levelType:   0,
-			edge:        association.offset,
+			edge:        association.Offset,
 		})
 		system.m = append(system.m, Chime{
 			association: association,
 			levelType:   1,
-			edge:        association.offset + system.rootDist(association),
+			edge:        association.Offset + system.rootDist(association),
 		})
 
 		n += 3
@@ -1300,7 +1263,7 @@ func (system *NTPSystem) clockSelect() {
 			if system.n > 1 {
 				for j := 0; j < system.n; j++ {
 					q := system.v[j].association
-					dtemp += math.Pow(p.offset-q.offset, 2)
+					dtemp += math.Pow(p.Offset-q.Offset, 2)
 				}
 				dtemp = math.Sqrt(dtemp / float64(system.n-1))
 			}
@@ -1348,7 +1311,7 @@ func (system *NTPSystem) clockSelect() {
 	system.clockUpdate(system.p)
 }
 
-func (system *NTPSystem) clockUpdate(association *Association) {
+func (system *NTPalSystem) clockUpdate(association *Association) {
 	info("Clock update**")
 	/*
 	 * If this is an old update, for instance, as the result of a
@@ -1410,18 +1373,18 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 	case SLEW:
 		info("Discipline SLEWED")
 		// Offset and jitter already set by clockCombine()
-		system.leap = association.leap
+		system.leap = association.Leap
 		system.t = uint64(association.t)
 		system.stratum = association.Stratum + 1
 		if association.Stratum == 0 || association.Stratum == 16 {
 			system.refid = association.Refid
 		} else {
-			system.refid = ipToRefID(association.srcaddr.IP)
+			system.refid = ipToRefID(association.Srcaddr.IP)
 		}
 		system.reftime = association.Reftime
 		system.rootdelay = association.Rootdelay + association.delay
 		dtemp := math.Max(association.Rootdisp+association.disp+system.jitter+PHI*(float64(system.clock.t)-association.update)+
-			math.Abs(association.offset), MINDISP)
+			math.Abs(association.Offset), MINDISP)
 		system.rootdisp = dtemp
 		fmt.Println("Root disp calc:", association.disp, association.Rootdisp)
 	/*
@@ -1433,7 +1396,7 @@ func (system *NTPSystem) clockUpdate(association *Association) {
 	}
 }
 
-func (system *NTPSystem) clockCombine() {
+func (system *NTPalSystem) clockCombine() {
 	var association *Association
 	var x, y, z, w float64
 
@@ -1455,14 +1418,14 @@ func (system *NTPSystem) clockCombine() {
 		association = system.v[i].association
 		x = system.rootDist(association)
 		y += 1 / x
-		z += association.offset / x
-		w += math.Pow(association.offset-system.v[0].association.offset, 2) / x
+		z += association.Offset / x
+		w += math.Pow(association.Offset-system.v[0].association.Offset, 2) / x
 	}
 	system.offset = z / y
 	system.jitter = math.Sqrt(w / y)
 }
 
-func (system *NTPSystem) localClock(association *Association, offset float64) LocalClockReturnCode {
+func (system *NTPalSystem) localClock(association *Association, offset float64) LocalClockReturnCode {
 	system.clock.lock.Lock()
 	defer system.clock.lock.Unlock()
 
@@ -1711,7 +1674,7 @@ func (system *NTPSystem) localClock(association *Association, offset float64) Lo
 	return rval
 }
 
-func (system *NTPSystem) rstclock(state int, t, offset float64) {
+func (system *NTPalSystem) rstclock(state int, t, offset float64) {
 	/*
 	 * Enter new state and set state variables.  Note, we use the
 	 * time of the last clock filter sample, which must be earlier
@@ -1726,12 +1689,12 @@ func (system *NTPSystem) rstclock(state int, t, offset float64) {
 /*
  * fit() - test if association p is acceptable for synchronization
  */
-func (system *NTPSystem) fit(association *Association) bool {
+func (system *NTPalSystem) fit(association *Association) bool {
 	/*
 	 * A stratum error occurs if (1) the server has never been
 	 * synchronized, (2) the server stratum is invalid.
 	 */
-	if association.leap == NOSYNC || association.Stratum >= MAXSTRAT {
+	if association.Leap == NOSYNC || association.Stratum >= MAXSTRAT {
 		return false
 	}
 
@@ -1741,7 +1704,7 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * interval.
 	 */
 	if system.rootDist(association) > float64(MAXDIST)+PHI*Log2ToDouble(system.poll) {
-		info("Don't fit?:", association.srcaddr.IP, system.rootDist(association), float64(MAXDIST)+PHI*Log2ToDouble(system.poll), association.disp, association.Rootdisp)
+		info("Don't fit?:", association.Srcaddr.IP, system.rootDist(association), float64(MAXDIST)+PHI*Log2ToDouble(system.poll), association.disp, association.Rootdisp)
 		return false
 	}
 
@@ -1751,21 +1714,21 @@ func (system *NTPSystem) fit(association *Association) bool {
 	 * system peer.  Note this is the behavior for IPv4; for IPv6
 	 * the MD5 hash is used instead.
 	 */
-	if association.Refid == ipToRefID(association.dstaddr.IP) || association.Refid == system.refid {
+	if association.Refid == ipToRefID(association.Dstaddr.IP) || association.Refid == system.refid {
 		return false
 	}
 
 	/*
 	 * An unreachable error occurs if the server is unreachable.
 	 */
-	if association.reach == 0 {
+	if association.Reach == 0 {
 		return false
 	}
 
 	return true
 }
 
-func (system *NTPSystem) rootDist(association *Association) float64 {
+func (system *NTPalSystem) rootDist(association *Association) float64 {
 	/*
 	 * The root synchronization distance is the maximum error due to
 	 * all causes of the local clock relative to the primary server.
@@ -1774,6 +1737,10 @@ func (system *NTPSystem) rootDist(association *Association) float64 {
 	 */
 	return (association.Rootdelay+association.delay)/2 +
 		association.Rootdisp + association.disp + PHI*float64(float64(system.clock.t)-association.update) + association.jitter
+}
+
+func (system *NTPalSystem) GetAssociations() []*ntp.Association {
+	return system.associations
 }
 
 func containsAssociation(survivors []Survivor, association *Association) bool {
