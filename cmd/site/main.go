@@ -22,7 +22,7 @@ type SyncResponse struct {
 }
 
 func main() {
-	port := os.Getenv("REPORT_PORT")
+	port := os.Getenv("SITE_PORT")
 	if port == "" {
 		port = "8080"
 	}
