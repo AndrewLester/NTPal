@@ -29,6 +29,7 @@ type ntpalUIModel struct {
 
 	table            table.Model
 	daemonKillStatus string
+	association      *ntp.Association
 	RPCInfo
 }
 
@@ -159,13 +160,13 @@ func setupTable() table.Model {
 		{Title: "Offset (ms)", Width: 15},
 		{Title: "Reach", Width: 15},
 		{Title: "Error", Width: 15},
-		{Title: "Last Update", Width: 25},
+		{Title: "Last Update", Width: 20},
 	}
 
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithFocused(true),
-		table.WithHeight(7),
+		table.WithHeight(4),
 	)
 
 	s := table.DefaultStyles()
@@ -175,8 +176,8 @@ func setupTable() table.Model {
 		BorderBottom(true).
 		Bold(true)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("218")).
-		Background(lipgloss.Color("70")).
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("34")).
 		Bold(false)
 	t.SetStyles(s)
 
