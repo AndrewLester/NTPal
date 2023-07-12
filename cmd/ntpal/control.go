@@ -5,6 +5,7 @@ import (
 	"net/rpc"
 	"strconv"
 	"time"
+	"duration"
 
 	"github.com/AndrewLester/ntpal/internal/ui"
 	"github.com/AndrewLester/ntpal/pkg/ntp"
@@ -24,17 +25,22 @@ func handleNTPalUI(socket string) {
 const fetchInfoPeriod = time.Second * 5
 
 type ntpalUIModel struct {
-	socket       string
-	associations []*ntp.RPCAssociation
-	table        table.Model
-
+	socket string
+	
+	table            table.Model
 	daemonKillStatus string
+	RPCInfo
 }
 
 var client *rpc.Client
 
+type RPCInfo struct {
+	associations []*ntp.Association
+	system       *ntp.System
+}
+
 type dialSocketMessage *rpc.Client
-type fetchInfoMessage []*ntp.Association
+type fetchInfoMessage RPCInfo
 type tickMsg time.Time
 
 func dialSocketCommand(m ntpalUIModel) tea.Cmd {
@@ -50,13 +56,25 @@ func dialSocketCommand(m ntpalUIModel) tea.Cmd {
 
 func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 	return func() tea.Msg {
-		var reply []*ntp.Association
-		err := client.Call("RPCServer.FetchAssociations", 0, &reply)
+		var associations []*ntp.Association
+		assocCall := client.Go("NTPalRPCServer.FetchAssociations", 0, &associations)
+		var system *ntp.System
+		systemCall := client.Go("NTPalRPCServer.FetchSystem", 0, &system)
+
+		err := <-assocCall
 		if err != nil {
 			log.Fatalf("Error getting info from daemon: %v", err)
 		}
 
-		return fetchInfoMessage(reply)
+		err := <-systemCall
+		if err != nil {
+			log.Fatalf("Error getting info from daemon: %v", err)
+		}
+
+		return fetchInfoMessage(RPCInfo{
+			associations: associations,
+			system: system,
+		})
 	}
 }
 
@@ -103,14 +121,15 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		client = msg
 		return m, tickCommand(0)
 	case fetchInfoMessage:
-		m.associations = msg
+		m.RPCInfo = msg
 		rows := []table.Row{}
 		for _, association := range m.associations {
 			row := table.Row{
 				association.Srcaddr.IP.String(),
 				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
 				association.Reach,
-				association.,
+				association.Jitter,
+				fmt.Sprintf("%s ago", duration.Duration((m.system.Clock.T - association.Update) * time.Second)),
 			}
 			rows = append(rows, row)
 		}
@@ -138,8 +157,9 @@ func setupTable() table.Model {
 	columns := []table.Column{
 		{Title: "Address", Width: 20},
 		{Title: "Offset (ms)", Width: 15},
-		{Title: "Reach", Width: 15}
-		{Title: "Error", Width: 15}
+		{Title: "Reach", Width: 15},
+		{Title: "Error", Width: 15},
+		{Title: "Last Update", Width: 25},
 	}
 
 	t := table.New(

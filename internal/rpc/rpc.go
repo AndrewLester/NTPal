@@ -6,17 +6,19 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"sync"
 
 	"github.com/AndrewLester/ntpal/internal/ntp"
 )
 
 type NTPalRPCServer struct {
 	Socket string
-	System *NTPSystem
+	System *ntp.System
+	GetAssociations func() []*Association
 }
 
-func (s *NTPalRPCServer) Listen() {
-	defer s.System.wg.Done()
+func (s *NTPalRPCServer) Listen(wg sync.WaitGroup) {
+	defer wg.Done()
 	
 	rpc.Register(s)
 
@@ -36,6 +38,11 @@ func (s *NTPalRPCServer) Listen() {
 }
 
 func (s *NTPalRPCServer) FetchAssociations(args int, reply *[]*ntp.Association) error {
-	*reply = s.System.GetAssociations()
+	*reply = s.GetAssociations()
+	return nil
+}
+
+func (s *NTPalRPCServer) FetchSystem(args int, reply **ntp.System) error {
+	*reply = s.System
 	return nil
 }
