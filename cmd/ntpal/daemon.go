@@ -11,10 +11,16 @@ import (
 
 const daemonName = "ntpald"
 
+var (
+	SocketPath = fmt.Sprintf("/var/%s.sock", daemonName)
+	PidPath    = fmt.Sprintf("/var/run/%s.pid", daemonName)
+	LogPath    = fmt.Sprintf("/var/log/%s.log", daemonName)
+)
+
 var daemonCtx = &daemon.Context{
-	PidFileName: fmt.Sprintf("/var/run/%s.pid", daemonName),
+	PidFileName: PidPath,
 	PidFilePerm: 0644,
-	LogFileName: fmt.Sprintf("/var/log/%s.log", daemonName),
+	LogFileName: LogPath,
 	LogFilePerm: 0640,
 	WorkDir:     "./",
 	Umask:       027,

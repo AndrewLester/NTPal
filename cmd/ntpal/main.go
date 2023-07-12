@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/AndrewLester/ntpal/pkg/ntpal"
-	"github.com/sevlyar/go-daemon"
 )
 
 const defaultConfigPath = "/etc/ntp.conf"
@@ -52,32 +51,38 @@ func main() {
 	if query != "" {
 		handleQueryCommand(system, query, queryMessages)
 	} else {
+		process, _ := daemonCtx.Search()
+
 		if !noDaemon {
+			if process != nil {
+				handleNTPalUI(SocketPath)
+				return
+			}
+
 			process, err := daemonCtx.Reborn()
 			if err != nil {
-				if errors.Is(err, daemon.ErrWouldBlock) {
-					handleNTPalUI(socketPath)
-					return
-				}
 				if errors.Is(err, os.ErrPermission) {
-					log.Fatal("You do not have permission to start the daemon. Try re-running with sudo.")
-					return
+					fmt.Printf("You do not have permission to start the daemon: %v\n", err)
+					os.Exit(1)
 				}
-				log.Fatal("Unable to run: ", err)
+				fmt.Printf("Error: unable to run: %v\n", err)
+				os.Exit(1)
 			}
+
+			// Parent process
 			if process != nil {
 				fmt.Printf("Daemon process (ntpald) started successfully with PID: %d\n", process.Pid)
 				return
 			}
+
+			// Child process
 			defer daemonCtx.Release()
 
 			log.Print(strings.Repeat("*", 20))
 			log.Print("ntpald started", os.Args)
-		} else {
-			process, _ := daemonCtx.Search()
-			if process != nil {
-				log.Fatal("Stop the ntpal daemon via `ntpal -s` before running in no-daemon mode.")
-			}
+		} else if process != nil {
+			fmt.Println("Stop the ntpal daemon via `ntpal -s` before running in no-daemon mode.")
+			os.Exit(1)
 		}
 
 		system.Start()

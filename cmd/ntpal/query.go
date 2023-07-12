@@ -43,7 +43,7 @@ type ntpQueryMessage string
 type ntpQueryError error
 type progressUpdateMessage struct{}
 
-func ntpQueryCommand(m queryCommandModel) tea.Cmd {
+func ntpQueryCmd(m queryCommandModel) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.system.Query(m.address, m.messages)
 		if err != nil {
@@ -60,7 +60,7 @@ func ntpQueryCommand(m queryCommandModel) tea.Cmd {
 	}
 }
 
-func filterListenCommand(m queryCommandModel) tea.Cmd {
+func filterListenCmd(m queryCommandModel) tea.Cmd {
 	return func() tea.Msg {
 		<-m.system.FilteredProgress
 		return progressUpdateMessage{}
@@ -68,7 +68,7 @@ func filterListenCommand(m queryCommandModel) tea.Cmd {
 }
 
 func (m queryCommandModel) Init() tea.Cmd {
-	return tea.Batch(ntpQueryCommand(m), filterListenCommand(m))
+	return tea.Batch(ntpQueryCmd(m), filterListenCmd(m))
 }
 
 func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -87,7 +87,7 @@ func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case progressUpdateMessage:
 		percentage += 1 / float64(m.messages)
-		return m, filterListenCommand(m)
+		return m, filterListenCmd(m)
 	case ntpQueryMessage:
 		result = string(msg)
 		return m, tea.Quit
