@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/AndrewLester/ntpal/internal/templates"
-	"github.com/AndrewLester/ntpal/pkg/ntp"
+	"github.com/AndrewLester/ntpal/pkg/ntpal"
 )
 
 type SyncRequest struct {
@@ -48,7 +48,7 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		recv := strconv.FormatUint(ntp.GetSystemTime(), 10)
+		recv := strconv.FormatUint(ntpal.GetSystemTime(), 10)
 
 		syncResponse := SyncResponse{
 			Orig: syncRequest.Orig,
@@ -58,7 +58,7 @@ func main() {
 
 		encoder := json.NewEncoder(w)
 
-		syncResponse.Xmt = strconv.FormatUint(ntp.GetSystemTime(), 10)
+		syncResponse.Xmt = strconv.FormatUint(ntpal.GetSystemTime(), 10)
 		encoder.Encode(syncResponse)
 	})
 

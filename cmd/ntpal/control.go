@@ -5,7 +5,6 @@ import (
 	"net/rpc"
 	"strconv"
 	"time"
-	"duration"
 
 	"github.com/AndrewLester/ntpal/internal/ui"
 	"github.com/AndrewLester/ntpal/pkg/ntp"
@@ -129,7 +128,7 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
 				association.Reach,
 				association.Jitter,
-				fmt.Sprintf("%s ago", duration.Duration((m.system.Clock.T - association.Update) * time.Second)),
+				fmt.Sprintf("%s ago", time.Duration((m.system.Clock.T - association.Update) * time.Second)),
 			}
 			rows = append(rows, row)
 		}
