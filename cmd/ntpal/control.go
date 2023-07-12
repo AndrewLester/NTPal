@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/rpc"
 	"strconv"
@@ -128,7 +129,7 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
 				strconv.FormatUint(uint64(association.Reach), 2),
 				strconv.FormatFloat(association.Jitter*1e3, 'G', 5, 64),
-				// fmt.Sprintf("%s ago", time.Duration(uint64(float64(m.system.Clock.T)-association.Update)*time.Second)),
+				fmt.Sprintf("%s ago", time.Duration(uint64(float64(m.system.Clock.T)-association.Update))*time.Second),
 			}
 			rows = append(rows, row)
 		}
@@ -158,7 +159,7 @@ func setupTable() table.Model {
 		{Title: "Offset (ms)", Width: 15},
 		{Title: "Reach", Width: 15},
 		{Title: "Error", Width: 15},
-		// {Title: "Last Update", Width: 25},
+		{Title: "Last Update", Width: 25},
 	}
 
 	t := table.New(
