@@ -115,7 +115,7 @@ var dispatchTable = [][]DispatchCode{
 }
 
 type NTPalSystem struct {
-	Clock Clock // Overwrite "Clock" of npt.System
+	Clock Clock
 
 	address   *net.UDPAddr
 	t         ntp.TimestampEncoded /* update time */
