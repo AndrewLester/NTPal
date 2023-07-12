@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/AndrewLester/ntpal/internal/ui"
-	"github.com/AndrewLester/ntpal/pkg/ntp"
+	"github.com/AndrewLester/ntpal/internal/ntp"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

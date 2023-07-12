@@ -45,7 +45,7 @@ func main() {
 		host = "0.0.0.0"
 	}
 
-	system := ntp.NewSystem(host, port, config, drift, socketPath)
+	system := ntpal.NewSystem(host, port, config, drift, socketPath)
 
 	if query != "" {
 		handleQueryCommand(system, query)

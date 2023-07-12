@@ -34,7 +34,7 @@ var result string
 
 type queryCommandModel struct {
 	progress progress.Model
-	system   *ntp.NTPSystem
+	system   *ntpal.NTPalSystem
 	messages int
 	address  string
 	err      error
