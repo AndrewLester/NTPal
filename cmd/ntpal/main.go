@@ -17,6 +17,8 @@ const defaultDriftPath = "/etc/ntp.drift"
 
 var socketPath = fmt.Sprintf("/var/%s.sock", daemonName)
 
+const queryMessages = 5
+
 func main() {
 	var config string
 	var drift string
@@ -48,7 +50,7 @@ func main() {
 	system := ntpal.NewSystem(host, port, config, drift, socketPath)
 
 	if query != "" {
-		handleQueryCommand(system, query)
+		handleQueryCommand(system, query, queryMessages)
 	} else {
 		if !noDaemon {
 			process, err := daemonCtx.Reborn()

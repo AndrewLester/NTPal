@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/charmbracelet/lipgloss"
+
 // Colors
 var (
 	TextWhite = lipgloss.Color("252")

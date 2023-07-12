@@ -11,10 +11,9 @@ import (
 	"github.com/AndrewLester/ntpal/pkg/ntpal"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-func handleQueryCommand(system *ntp.NTPalSystem, query string, messages int) {
+func handleQueryCommand(system *ntpal.NTPalSystem, query string, messages int) {
 	m := queryCommandModel{system: system, address: query, messages: messages}
 	m.progress = progress.New(progress.WithScaledGradient("#68b1b1", "#6ea4ff"))
 
@@ -87,7 +86,7 @@ func (m queryCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case progressUpdateMessage:
-		percentage += 1 / float64(messages)
+		percentage += 1 / float64(m.messages)
 		return m, filterListenCommand(m)
 	case ntpQueryMessage:
 		result = string(msg)

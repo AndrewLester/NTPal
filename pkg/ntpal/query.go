@@ -2,9 +2,10 @@ package ntpal
 
 import (
 	"errors"
-	"math/rand"
 	"net"
 	"time"
+
+	"github.com/AndrewLester/ntpal/internal/ntp"
 )
 
 type QueryResult struct {
@@ -17,7 +18,7 @@ var (
 	ErrNoResponse = errors.New("server did not respond")
 )
 
-func (system *NTPSystem) Query(address string, messages int) (*QueryResult, error) {
+func (system *NTPalSystem) Query(address string, messages int) (*QueryResult, error) {
 	system.query = true
 
 	hostAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(system.host, system.port))
@@ -26,18 +27,20 @@ func (system *NTPSystem) Query(address string, messages int) (*QueryResult, erro
 	}
 	system.address = hostAddr
 
-	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(address, PORT))
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(address, ntp.Port))
 	if err != nil {
 		return nil, err
 	}
 	association := &Association{
-		hmode: CLIENT,
+		hmode: ntp.CLIENT,
 		hpoll: 0,
-		ReceivePacket: ReceivePacket{
-			srcaddr: addr,
-			dstaddr: system.address,
-			version: VERSION,
-			keyid:   0,
+		Association: ntp.Association{
+			ReceivePacket: ntp.ReceivePacket{
+				Srcaddr: addr,
+				Dstaddr: system.address,
+				Version: VERSION,
+				Keyid:   0,
+			},
 		},
 	}
 	system.clear(association, INIT)
@@ -52,7 +55,7 @@ func (system *NTPSystem) Query(address string, messages int) (*QueryResult, erro
 		select {
 		case <-system.filtered:
 			// Exit early if the association's state is not synced
-			if association.leap == NOSYNC {
+			if association.Leap == NOSYNC {
 				return nil, ErrNoSync
 			}
 

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/AndrewLester/ntpal/internal/ui"
 	"github.com/AndrewLester/ntpal/internal/ntp"
+	"github.com/AndrewLester/ntpal/internal/ui"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -25,7 +25,7 @@ const fetchInfoPeriod = time.Second * 5
 
 type ntpalUIModel struct {
 	socket string
-	
+
 	table            table.Model
 	daemonKillStatus string
 	RPCInfo
@@ -56,23 +56,23 @@ func dialSocketCommand(m ntpalUIModel) tea.Cmd {
 func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 	return func() tea.Msg {
 		var associations []*ntp.Association
-		assocCall := client.Go("NTPalRPCServer.FetchAssociations", 0, &associations)
+		assocCall := client.Go("NTPalRPCServer.FetchAssociations", 0, &associations, nil)
 		var system *ntp.System
-		systemCall := client.Go("NTPalRPCServer.FetchSystem", 0, &system)
+		systemCall := client.Go("NTPalRPCServer.FetchSystem", 0, &system, nil)
 
-		err := <-assocCall
+		err := (<-assocCall.Done).Error
 		if err != nil {
 			log.Fatalf("Error getting info from daemon: %v", err)
 		}
 
-		err := <-systemCall
+		err = (<-systemCall.Done).Error
 		if err != nil {
 			log.Fatalf("Error getting info from daemon: %v", err)
 		}
 
 		return fetchInfoMessage(RPCInfo{
 			associations: associations,
-			system: system,
+			system:       system,
 		})
 	}
 }
@@ -120,15 +120,15 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		client = msg
 		return m, tickCommand(0)
 	case fetchInfoMessage:
-		m.RPCInfo = msg
+		m.RPCInfo = RPCInfo(msg)
 		rows := []table.Row{}
 		for _, association := range m.associations {
 			row := table.Row{
 				association.Srcaddr.IP.String(),
 				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
-				association.Reach,
-				association.Jitter,
-				fmt.Sprintf("%s ago", time.Duration((m.system.Clock.T - association.Update) * time.Second)),
+				strconv.FormatUint(uint64(association.Reach), 2),
+				strconv.FormatFloat(association.Jitter*1e3, 'G', 5, 64),
+				// fmt.Sprintf("%s ago", time.Duration(uint64(float64(m.system.Clock.T)-association.Update)*time.Second)),
 			}
 			rows = append(rows, row)
 		}
@@ -142,7 +142,7 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ntpalUIModel) View() (s string) {
-	s += ui.Text("NTPal") + "\n"
+	s += ui.Title("NTPal") + "\n"
 	s += ui.TableBase(m.table.View()) + "\n\n"
 	if m.daemonKillStatus != "" {
 		s += m.daemonKillStatus + "\n"
@@ -158,7 +158,7 @@ func setupTable() table.Model {
 		{Title: "Offset (ms)", Width: 15},
 		{Title: "Reach", Width: 15},
 		{Title: "Error", Width: 15},
-		{Title: "Last Update", Width: 25},
+		// {Title: "Last Update", Width: 25},
 	}
 
 	t := table.New(

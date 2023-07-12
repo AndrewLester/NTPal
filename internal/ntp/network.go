@@ -8,14 +8,14 @@ import (
 )
 
 type ReceivePacket struct {
-	Srcaddr *net.UDPAddr        /* source (remote) address */
-	Dstaddr *net.UDPAddr        /* destination (local) address */
-	Leap    byte                /* leap indicator */
-	Version byte                /* version number */
-	Mode    Mode                /* mode */
-	Keyid   int32               /* key ID */
-	Mac     Digest              /* message digest */
-	Dst     NTPTimestampEncoded /* destination timestamp */
+	Srcaddr *net.UDPAddr     /* source (remote) address */
+	Dstaddr *net.UDPAddr     /* destination (local) address */
+	Leap    byte             /* leap indicator */
+	Version byte             /* version number */
+	Mode    Mode             /* mode */
+	Keyid   int32            /* key ID */
+	Mac     Digest           /* message digest */
+	Dst     TimestampEncoded /* destination timestamp */
 	ntpFieldsEncoded
 }
 
@@ -31,20 +31,20 @@ type TransmitPacket struct {
 }
 
 type ntpFieldsEncoded struct {
-	Stratum   byte                /* stratum */
-	Poll      int8                /* poll interval */
-	Precision int8                /* precision */
-	Rootdelay NTPShortEncoded     /* root delay */
-	Rootdisp  NTPShortEncoded     /* root dispersion */
-	Refid     NTPShortEncoded     /* reference ID */
-	Reftime   NTPTimestampEncoded /* reference time */
-	Org       NTPTimestampEncoded /* origin timestamp */
-	Rec       NTPTimestampEncoded /* receive timestamp */
-	Xmt       NTPTimestampEncoded /* transmit timestamp */
+	Stratum   byte             /* stratum */
+	Poll      int8             /* poll interval */
+	Precision int8             /* precision */
+	Rootdelay ShortEncoded     /* root delay */
+	Rootdisp  ShortEncoded     /* root dispersion */
+	Refid     ShortEncoded     /* reference ID */
+	Reftime   TimestampEncoded /* reference time */
+	Org       TimestampEncoded /* origin timestamp */
+	Rec       TimestampEncoded /* receive timestamp */
+	Xmt       TimestampEncoded /* transmit timestamp */
 }
 
 func EncodeTransmitPacket(packet TransmitPacket) []byte {
-	firstByte := (packet.leap << 6) | (packet.version << 3) | byte(packet.mode)
+	firstByte := (packet.Leap << 6) | (packet.Version << 3) | byte(packet.Mode)
 
 	var buffer bytes.Buffer
 	binary.Write(&buffer, binary.BigEndian, firstByte)
@@ -81,11 +81,11 @@ func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	}
 
 	return &ReceivePacket{
-		srcaddr:          clientUDPAddr,
-		dstaddr:          localUDPAddr,
-		leap:             leap,
-		version:          version,
-		mode:             Mode(mode),
+		Srcaddr:          clientUDPAddr,
+		Dstaddr:          localUDPAddr,
+		Leap:             leap,
+		Version:          version,
+		Mode:             Mode(mode),
 		ntpFieldsEncoded: fieldsEncoded,
 	}, nil
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/AndrewLester/ntpal/internal/ntp"
 )
 
 type ntpConfig struct {
@@ -25,22 +27,22 @@ type serverAssociationConfig struct {
 	version  int
 	minpoll  int
 	maxpoll  int
-	hmode    Mode
+	hmode    ntp.Mode
 }
 
 const defaultMinpoll = 6
 const defaultMaxpoll = 10
 
-func parseConfig(path string) NTPConfig {
+func parseConfig(path string) ntpConfig {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("File at", path, "could not be read for configuration:", err)
 	}
 	defer file.Close()
 
-	config := NTPConfig{}
+	config := ntpConfig{}
 
-	serverAssociations := []ServerAssociationConfig{}
+	serverAssociations := []serverAssociationConfig{}
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -87,7 +89,7 @@ func parseConfig(path string) NTPConfig {
 				configParseError("minpoll must be less than maxpoll")
 			}
 
-			serverAssociation := ServerAssociationConfig{
+			serverAssociation := serverAssociationConfig{
 				address:  address,
 				hostname: arguments[1],
 				burst:    burst,
@@ -97,7 +99,7 @@ func parseConfig(path string) NTPConfig {
 				version:  version,
 				minpoll:  minpoll,
 				maxpoll:  maxpoll,
-				hmode:    CLIENT,
+				hmode:    ntp.CLIENT,
 			}
 			serverAssociations = append(serverAssociations, serverAssociation)
 		case "driftfile":
@@ -126,7 +128,7 @@ func parseConfig(path string) NTPConfig {
 func optionalArgument(name string, arguments *[]string) bool {
 	for i, argument := range *arguments {
 		if name == argument {
-			RemoveIndex(arguments, i)
+			removeIndex(arguments, i)
 			return true
 		}
 	}
@@ -151,8 +153,8 @@ func stringArgument(name string, initial string, arguments *[]string) string {
 			}
 
 			value := (*arguments)[i+1]
-			RemoveIndex(arguments, i)
-			RemoveIndex(arguments, i+1)
+			removeIndex(arguments, i)
+			removeIndex(arguments, i+1)
 			return value
 		}
 	}

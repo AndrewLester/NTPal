@@ -3,27 +3,28 @@ package ntpal
 import (
 	"math"
 
+	"github.com/AndrewLester/ntpal/internal/ntp"
 	"github.com/AndrewLester/ntpal/internal/system/adjtime"
 	"github.com/AndrewLester/ntpal/internal/system/settimeofday"
 	"golang.org/x/sys/unix"
 )
 
-func GetSystemTime() NTPTimestampEncoded {
+func GetSystemTime() ntp.TimestampEncoded {
 	var unixTime unix.Timespec
 	unix.ClockGettime(unix.CLOCK_REALTIME, &unixTime)
-	return (UnixToNTPTimestampEncoded(unixTime))
+	return (ntp.UnixToNTPTimestampEncoded(unixTime))
 }
 
 func stepTime(offset float64) {
 	systemTime := GetSystemTime()
-	ntpTime := DoubleToNTPTimestampEncoded(offset) + systemTime
+	ntpTime := ntp.DoubleToNTPTimestampEncoded(offset) + systemTime
 
 	Sec := int64(ntpTime >> 32)
 	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
-		32)) / float64(eraLength) * 1e6))
-	Sec -= unixEraOffset
+		32)) / float64(ntp.EraLength) * 1e6))
+	Sec -= ntp.UnixEraOffset
 
-	info("CURRENT:", NTPTimestampToTime(systemTime), "STEPPING TO:", NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
+	info("CURRENT:", ntp.NTPTimestampToTime(systemTime), "STEPPING TO:", ntp.NTPTimestampToTime(ntpTime), "OFFSET WAS:", offset)
 
 	err := settimeofday.Settimeofday(Sec, Usec)
 	if err != nil {
@@ -37,11 +38,11 @@ func adjustTime(offset float64) {
 	}
 
 	sign := math.Copysign(1, offset)
-	ntpTime := DoubleToNTPTimestampEncoded(math.Abs(offset))
+	ntpTime := ntp.DoubleToNTPTimestampEncoded(math.Abs(offset))
 
 	Sec := int64(ntpTime>>32) * int64(sign)
 	Usec := int32(math.Round(float64(int64(ntpTime)-(Sec<<
-		32))/float64(eraLength)*1e6)) * int32(sign)
+		32))/float64(ntp.EraLength)*1e6)) * int32(sign)
 	debug("Adjtime: ", Sec, Usec)
 
 	for Usec < 0 {

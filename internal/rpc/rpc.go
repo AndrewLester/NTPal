@@ -1,4 +1,4 @@
-package ntp
+package rpc
 
 import (
 	"errors"
@@ -12,14 +12,14 @@ import (
 )
 
 type NTPalRPCServer struct {
-	Socket string
-	System *ntp.System
-	GetAssociations func() []*Association
+	Socket          string
+	System          *ntp.System
+	GetAssociations func() []*ntp.Association
 }
 
-func (s *NTPalRPCServer) Listen(wg sync.WaitGroup) {
+func (s *NTPalRPCServer) Listen(wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	rpc.Register(s)
 
 	err := os.Remove(s.Socket)
