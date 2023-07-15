@@ -13,6 +13,8 @@ import (
 	"github.com/AndrewLester/ntpal/pkg/ntpal"
 )
 
+var version string // This is set by the linker
+
 type SyncRequest struct {
 	Orig string
 }
@@ -29,7 +31,8 @@ func main() {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]string{
-			"Region": strings.ToUpper(os.Getenv("FLY_REGION")),
+			"Region":  strings.ToUpper(os.Getenv("FLY_REGION")),
+			"Version": version,
 		}
 
 		// Set these headers to bump performance.now() precision to 5 microseconds

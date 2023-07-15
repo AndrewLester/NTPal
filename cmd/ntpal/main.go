@@ -11,6 +11,8 @@ import (
 	"github.com/AndrewLester/ntpal/pkg/ntpal"
 )
 
+var version string // This is set by the linker
+
 const defaultConfigPath = "/etc/ntp.conf"
 const defaultDriftPath = "/etc/ntp.drift"
 
@@ -22,6 +24,7 @@ func main() {
 	var query string
 	var noDaemon bool
 	var stop bool
+	var isVersion bool
 	flag.StringVar(&config, "config", defaultConfigPath, "Path to the NTP config file.")
 	flag.StringVar(&drift, "drift", defaultDriftPath, "Path to the NTP drift file.")
 	flag.StringVar(&query, "query", "", "Address to query.")
@@ -29,7 +32,14 @@ func main() {
 	flag.BoolVar(&noDaemon, "no-daemon", false, "Don't run ntpal as a daemon.")
 	flag.BoolVar(&stop, "stop", false, "Stop the ntpal daemon.")
 	flag.BoolVar(&stop, "s", stop, "Stop the ntpal daemon.")
+	flag.BoolVar(&isVersion, "version", false, "Check the NTPal version.")
+	flag.BoolVar(&isVersion, "v", isVersion, "Check the NTPal version.")
 	flag.Parse()
+
+	if isVersion {
+		fmt.Println("NTPal", version)
+		return
+	}
 
 	port := os.Getenv("NTP_PORT")
 	if port == "" {

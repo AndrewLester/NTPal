@@ -27,6 +27,8 @@ jobs:
               with:
                   name: ntpal-binary-${{ matrix.os }}
                   path: ${{ github.workspace }}/bin/ntpal-${{ matrix.os }}
+              env:
+                  VERSION: ${github.ref/v/}
 
     release:
         runs-on: ubuntu-latest
