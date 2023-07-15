@@ -10,7 +10,7 @@ The code for NTPal is _very_ similar to pseudocode provided in the [NTPv4 RFC](h
 
 ### Installation
 
-The NTPal binary (`ntpal`) can be downloaded for MacOS or Linux via the [most recent GitHub release](https://github.com/AndrewLester/NTPal/releases).
+The NTPal binary (`ntpal`) can be downloaded for MacOS or Linux via the [most recent GitHub release](https://github.com/AndrewLester/NTPal/releases/latest).
 
 ### [time.andrewlester.net](https://time.andrewlester.net)
 
