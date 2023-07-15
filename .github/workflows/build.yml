@@ -22,7 +22,7 @@ jobs:
             - name: Build
               run: make
               env:
-                  VERSION: ${github.ref/v/}
+                  VERSION: ${{ github.ref_name }}
             - run: mv ${{ github.workspace }}/bin/ntpal ${{ github.workspace }}/bin/ntpal-${{ matrix.os }}
             - name: Upload
               uses: actions/upload-artifact@v3
@@ -51,7 +51,7 @@ jobs:
               with:
                   tag_name: ${{ github.ref }}
                   release_name: Release ${{ github.ref }}
-                  body: "### Release for ref - ${{ github.ref }}\nChanges:\n- ${{ join(github.event.commits.*.message, '\n- ') }}"
+                  body: "### Release for ref - ${{ github.ref_name }}\nChanges:\n- ${{ join(github.event.commits.*.message, '\n- ') }}"
                   draft: false
                   prerelease: false
             - name: Upload Release Asset
