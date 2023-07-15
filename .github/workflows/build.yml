@@ -22,7 +22,7 @@ jobs:
             - name: Build
               run: make
               env:
-                  VERSION: ${{ github.ref_name }}
+                  VERSION: ${GITHUB_REF_NAME/v}
             - run: mv ${{ github.workspace }}/bin/ntpal ${{ github.workspace }}/bin/ntpal-${{ matrix.os }}
             - name: Upload
               uses: actions/upload-artifact@v3
