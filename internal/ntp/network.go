@@ -8,15 +8,8 @@ import (
 )
 
 type ReceivePacket struct {
-	Srcaddr *net.UDPAddr     /* source (remote) address */
-	Dstaddr *net.UDPAddr     /* destination (local) address */
-	Leap    byte             /* leap indicator */
-	Version byte             /* version number */
-	Mode    Mode             /* mode */
-	Keyid   int32            /* key ID */
-	Mac     Digest           /* message digest */
-	Dst     TimestampEncoded /* destination timestamp */
-	ntpFieldsEncoded
+	Dst TimestampEncoded /* destination timestamp */
+	TransmitPacket
 }
 
 type TransmitPacket struct {
@@ -25,12 +18,12 @@ type TransmitPacket struct {
 	Leap    byte         /* leap indicator */
 	Version byte         /* version number */
 	Mode    Mode         /* mode */
-	Keyid   int          /* key ID */
+	Keyid   int32        /* key ID */
 	Dgst    Digest       /* message digest */
-	ntpFieldsEncoded
+	NtpFieldsEncoded
 }
 
-type ntpFieldsEncoded struct {
+type NtpFieldsEncoded struct {
 	Stratum   byte             /* stratum */
 	Poll      int8             /* poll interval */
 	Precision int8             /* precision */
@@ -48,7 +41,7 @@ func EncodeTransmitPacket(packet TransmitPacket) []byte {
 
 	var buffer bytes.Buffer
 	binary.Write(&buffer, binary.BigEndian, firstByte)
-	binary.Write(&buffer, binary.BigEndian, &packet.ntpFieldsEncoded)
+	binary.Write(&buffer, binary.BigEndian, &packet.NtpFieldsEncoded)
 	return buffer.Bytes()
 }
 
@@ -75,17 +68,19 @@ func DecodeRecvPacket(encoded []byte, clientAddr net.Addr, con net.PacketConn) (
 	version := (firstByte >> 3) & 0b111
 	mode := firstByte & 0b111
 
-	fieldsEncoded := ntpFieldsEncoded{}
+	fieldsEncoded := NtpFieldsEncoded{}
 	if err := binary.Read(reader, binary.BigEndian, &fieldsEncoded); err != nil {
 		return nil, err
 	}
 
 	return &ReceivePacket{
-		Srcaddr:          clientUDPAddr,
-		Dstaddr:          localUDPAddr,
-		Leap:             leap,
-		Version:          version,
-		Mode:             Mode(mode),
-		ntpFieldsEncoded: fieldsEncoded,
+		TransmitPacket: TransmitPacket{
+			Srcaddr:          clientUDPAddr,
+			Dstaddr:          localUDPAddr,
+			Leap:             leap,
+			Version:          version,
+			Mode:             Mode(mode),
+			NtpFieldsEncoded: fieldsEncoded,
+		},
 	}, nil
 }

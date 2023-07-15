@@ -14,8 +14,6 @@ import (
 const defaultConfigPath = "/etc/ntp.conf"
 const defaultDriftPath = "/etc/ntp.drift"
 
-var socketPath = fmt.Sprintf("/var/%s.sock", daemonName)
-
 const queryMessages = 5
 
 func main() {
@@ -46,10 +44,18 @@ func main() {
 		host = "0.0.0.0"
 	}
 
-	system := ntpal.NewSystem(host, port, config, drift, socketPath)
+	system := ntpal.NewSystem(host, port, config, drift, SocketPath)
 
 	if query != "" {
 		handleQueryCommand(system, query, queryMessages)
+	} else if stop {
+		err := killDaemon()
+		if err == nil {
+			fmt.Println("Stopped ntpald")
+		} else {
+			fmt.Printf("Error stopping ntpald: %v\n", err)
+			os.Exit(1)
+		}
 	} else {
 		process, _ := daemonCtx.Search()
 
@@ -72,6 +78,7 @@ func main() {
 			// Parent process
 			if process != nil {
 				fmt.Printf("Daemon process (ntpald) started successfully with PID: %d\n", process.Pid)
+				// TODO: Launch control UI here, but need to sleep or connect with backoff
 				return
 			}
 

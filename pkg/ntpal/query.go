@@ -36,10 +36,12 @@ func (system *NTPalSystem) Query(address string, messages int) (*QueryResult, er
 		Association: ntp.Association{
 			Hpoll: 0,
 			ReceivePacket: ntp.ReceivePacket{
-				Srcaddr: addr,
-				Dstaddr: system.address,
-				Version: VERSION,
-				Keyid:   0,
+				TransmitPacket: ntp.TransmitPacket{
+					Srcaddr: addr,
+					Dstaddr: system.address,
+					Version: VERSION,
+					Keyid:   0,
+				},
 			},
 		},
 	}

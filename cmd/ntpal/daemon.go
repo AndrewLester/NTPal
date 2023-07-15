@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"syscall"
 
@@ -17,6 +17,8 @@ var (
 	LogPath    = fmt.Sprintf("/var/log/%s.log", daemonName)
 )
 
+var ErrNotRunning = errors.New("daemon ntpald is not running")
+
 var daemonCtx = &daemon.Context{
 	PidFileName: PidPath,
 	PidFilePerm: 0644,
@@ -27,14 +29,19 @@ var daemonCtx = &daemon.Context{
 	Args:        append([]string{daemonName}, os.Args[1:]...),
 }
 
-func killDaemon() {
+func killDaemon() error {
 	daemon, err := daemonCtx.Search()
-	if err != nil {
-		log.Fatalf("Error finding daemon: %v", err)
+	if daemon == nil {
+		if err == nil {
+			err = ErrNotRunning
+		}
+		return err
 	}
 
 	err = syscall.Kill(daemon.Pid, syscall.SIGTERM)
 	if err != nil {
-		log.Fatal("Couldn't stop ntpal daemon.")
+		return err
 	}
+
+	return nil
 }

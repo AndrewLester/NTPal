@@ -318,10 +318,12 @@ func (system *NTPalSystem) setupAssociations(associationConfigs []serverAssociat
 				Hpoll:    int8(associationConfig.minpoll),
 				Hostname: associationConfig.hostname,
 				ReceivePacket: ntp.ReceivePacket{
-					Srcaddr: associationConfig.address,
-					Dstaddr: system.address,
-					Version: byte(associationConfig.version),
-					Keyid:   int32(associationConfig.key),
+					TransmitPacket: ntp.TransmitPacket{
+						Srcaddr: associationConfig.address,
+						Dstaddr: system.address,
+						Version: byte(associationConfig.version),
+						Keyid:   int32(associationConfig.key),
+					},
 				},
 			},
 		}

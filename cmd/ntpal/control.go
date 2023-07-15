@@ -73,7 +73,6 @@ func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 		assocCall := client.Go("NTPalRPCServer.FetchAssociations", 0, &associations, nil)
 		var system *ntp.System
 		systemCall := client.Go("NTPalRPCServer.FetchSystem", 0, &system, nil)
-
 		err := (<-assocCall.Done).Error
 		if err != nil {
 			fmt.Printf("Error getting info from daemon: %v\n", err)
@@ -173,7 +172,7 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				{"Hostname", m.association.Hostname},
 				{"IP", m.association.Srcaddr.IP.String()},
 				{"Offset (ms)", ui.TableFloat(m.association.Offset * 1e3)},
-				{"Poll", (time.Duration(ntp.Log2ToDouble(int8(math.Max(float64(m.association.Poll), float64(m.association.Hpoll))))) * time.Second).String()},
+				{"Poll", (time.Duration(ntp.Log2ToDouble(int8(math.Min(float64(m.association.Poll), float64(m.association.Hpoll))))) * time.Second).String()},
 				{"Reach", strconv.FormatUint(uint64(m.association.Reach), 2)},
 				{"Root delay", ui.TableFloat(m.association.Rootdelay)},
 				{"Root dispersion", ui.TableFloat(m.association.Rootdisp)},
