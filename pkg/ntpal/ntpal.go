@@ -121,7 +121,6 @@ type NTPalSystem struct {
 
 	address   *net.UDPAddr
 	t         ntp.TimestampEncoded /* update time */
-	leap      byte                 /* leap indicator */
 	stratum   byte                 /* stratum */
 	poll      int8                 /* poll interval */
 	precision int8                 /* precision */
@@ -254,12 +253,15 @@ func NewSystem(host, port, config, drift, socket string) *NTPalSystem {
 		socket:           socket,
 		drift:            drift,
 		mode:             ntp.SERVER,
-		leap:             NOSYNC,
 		poll:             MINPOLL,
 		precision:        PRECISION,
+		stratum:          MAXSTRAT,
 		hold:             WATCH,
 		filtered:         make(chan any),
 		FilteredProgress: make(chan any),
+		System: ntp.System{
+			Leap: NOSYNC,
+		},
 	}
 	// Map the local struct values to the embedded System's
 	system.System.Clock = &system.Clock.Clock
@@ -483,7 +485,7 @@ func (system *NTPalSystem) clockAdjust() {
 				"("+association.Srcaddr.IP.String()+"):",
 				sync,
 				"POLL:", strconv.Itoa(int(ntp.Log2ToDouble(association.Poll)))+"s",
-				"hPOLL:", strconv.Itoa(int(ntp.Log2ToDouble(association.Poll)))+"s",
+				"hPOLL:", strconv.Itoa(int(ntp.Log2ToDouble(association.Hpoll)))+"s",
 				"STRATUM:", association.Stratum,
 				"REFID:", refid,
 				"OFFSET:", association.Offset,
