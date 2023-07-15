@@ -1395,9 +1395,6 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 	var rval LocalClockReturnCode
 	var etemp, dtemp float64
 
-	/*
-	 * If the offset is too large, give up and go home.
-	 */
 	if math.Abs(offset) > PANICT {
 		return PANIC
 	}
@@ -1413,7 +1410,6 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 	freq = 0
 	info("Disciplining with offset:", offset)
 	if math.Abs(offset) > STEPT {
-		// fmt.Println("Offset > STEPT (0.128)", "|STATE:", system.Clock.State, "|OFFSET:", offset)
 		switch system.Clock.State {
 		/*
 		 * In S_SYNC state, we ignore the first outlier and
