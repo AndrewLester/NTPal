@@ -18,9 +18,8 @@ import (
 )
 
 const VERSION byte = 4     // NTP version number
-const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 3     //minimum poll exponent (8 s)
-const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
+const MINPOLL int8 = 3     //minimum _possible_ poll exponent (8 s) (default is different, same for below)
+const MAXPOLL int8 = 17    // maximum _possible_ poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
 const NOSYNC byte = 0x3    // leap unsync
@@ -50,15 +49,10 @@ const LIMIT = 30       /* poll-adjust threshold */
 const MAXFREQ = 500e-6 /* frequency tolerance (500 ppm) */
 const PGATE = 4        /* poll-adjust gate */
 
-const MINCLOCK = 3  /* minimum manycast survivors */
-const MAXCLOCK = 10 /* maximum manycast candidates */
-const TTLMAX = 8    /* max ttl manycast */
-const BEACON = 15   /* max interval between beacons */
-
 const MTU = 1300
 const PRECISION = -18 /* precision (log2 s)  */
 
-const STARTUP_OFFSET_MAX = 5e-4
+const STARTUP_OFFSET_MAX = 5e-4 // Exit holding phase if abs(offset) is less than this
 
 const (
 	NSET int = iota
@@ -168,7 +162,6 @@ type Association struct {
 	maxpoll  int8
 	minpoll  int8
 
-	isMany    bool // manycast client association
 	ephemeral bool
 }
 
@@ -464,32 +457,6 @@ func (system *NTPalSystem) clockAdjust() {
 
 func (system *NTPalSystem) sendPoll(association *Association) {
 	hpoll := association.Hpoll
-	if association.hmode == ntp.BROADCAST_SERVER {
-		association.outdate = int32(system.Clock.T)
-		if system.Association != nil {
-			system.pollPeer(association)
-		}
-		system.pollUpdate(association, hpoll)
-		return
-	}
-
-	if association.hmode == ntp.CLIENT && association.isMany {
-		association.outdate = int32(system.Clock.T)
-		if association.unreach > BEACON {
-			association.unreach = 0
-			association.ttl = 1
-			system.pollPeer(association)
-		} else if system.n < MINCLOCK {
-			if association.ttl < TTLMAX {
-				association.ttl++
-			}
-			system.pollPeer(association)
-		}
-
-		association.unreach++
-		system.pollUpdate(association, hpoll)
-		return
-	}
 
 	if association.burst == 0 {
 		association.outdate = int32(system.Clock.T)
@@ -573,6 +540,8 @@ func (system *NTPalSystem) receive(packet ntp.ReceivePacket) *ntp.TransmitPacket
 		system.clear(association, INIT)
 		system.associations = append(system.associations, association)
 	case PROC:
+
+	// Manycast and broadcast not supported by NTPal
 	default:
 		return nil
 	}
