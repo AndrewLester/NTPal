@@ -2,6 +2,13 @@ package ntp
 
 type System struct {
 	Clock *Clock
+
+	Association *Association
+	Offset      float64
+	Jitter      float64
+	Leap        byte
+	Rootdelay   float64
+	Rootdisp    float64
 }
 
 type Clock struct {

@@ -11,13 +11,20 @@ import (
 
 	"github.com/AndrewLester/ntpal/internal/ntp"
 	"github.com/AndrewLester/ntpal/internal/ui"
+	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 func handleNTPalUI(socket string) {
-	m := ntpalUIModel{socket: socket, associationTable: setupAssociationTable(), detailTable: setupDetailTable()}
+	m := ntpalUIModel{
+		socket:           socket,
+		associationTable: setupAssociationTable(),
+		systemTable:      setupDetailTable(),
+		detailTable:      setupDetailTable(),
+		paginator:        setupPaginator(),
+	}
 
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		log.Fatal(err)
@@ -31,6 +38,8 @@ type ntpalUIModel struct {
 
 	associationTable table.Model
 	detailTable      table.Model
+	systemTable      table.Model
+	paginator        paginator.Model
 	daemonKillStatus string
 	association      *ntp.Association
 	RPCInfo
@@ -67,13 +76,13 @@ func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 
 		err := (<-assocCall.Done).Error
 		if err != nil {
-			fmt.Printf("Error getting info from daemon: %v", err)
+			fmt.Printf("Error getting info from daemon: %v\n", err)
 			os.Exit(1)
 		}
 
 		err = (<-systemCall.Done).Error
 		if err != nil {
-			log.Printf("Error getting info from daemon: %v", err)
+			fmt.Printf("Error getting info from daemon: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -128,6 +137,10 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailTable.SetHeight(1)
 
 			return m, fetchInfoCommand(m)
+		case "right", "left":
+			var cmd tea.Cmd
+			m.paginator, cmd = m.paginator.Update(msg)
+			return m, cmd
 		case "stop", "s":
 			m.daemonKillStatus = "Stopping ntpald"
 			return m, tea.Sequence(stopDaemonCommand(), tea.Quit)
@@ -156,27 +169,45 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Detail table
 		if m.association != nil {
-			rows := []table.Row{}
-			rows = append(rows,
-				table.Row{"Hostname", m.association.Hostname},
-				table.Row{"IP", m.association.Srcaddr.IP.String()},
-				table.Row{"Offset (ms)", ui.TableFloat(m.association.Offset * 1e3)},
-				table.Row{"Poll", (time.Duration(ntp.Log2ToDouble(int8(math.Max(float64(m.association.Poll), float64(m.association.Hpoll))))) * time.Second).String()},
-				table.Row{"Reach", strconv.FormatUint(uint64(m.association.Reach), 2)},
-				table.Row{"Root delay", ui.TableFloat(m.association.Rootdelay)},
-				table.Row{"Root dispersion", ui.TableFloat(m.association.Rootdisp)},
-				table.Row{"Delay", ui.TableFloat(m.association.Delay)},
-				table.Row{"Dispersion", ui.TableFloat(m.association.Disp)},
-				table.Row{"initial burst", strconv.FormatBool(m.association.IburstEnabled)},
-				table.Row{"burst", strconv.FormatBool(m.association.BurstEnabled)},
-			)
+			rows := []table.Row{
+				{"Hostname", m.association.Hostname},
+				{"IP", m.association.Srcaddr.IP.String()},
+				{"Offset (ms)", ui.TableFloat(m.association.Offset * 1e3)},
+				{"Poll", (time.Duration(ntp.Log2ToDouble(int8(math.Max(float64(m.association.Poll), float64(m.association.Hpoll))))) * time.Second).String()},
+				{"Reach", strconv.FormatUint(uint64(m.association.Reach), 2)},
+				{"Root delay", ui.TableFloat(m.association.Rootdelay)},
+				{"Root dispersion", ui.TableFloat(m.association.Rootdisp)},
+				{"Delay", ui.TableFloat(m.association.Delay)},
+				{"Dispersion", ui.TableFloat(m.association.Disp)},
+				{"initial burst", strconv.FormatBool(m.association.IburstEnabled)},
+				{"burst", strconv.FormatBool(m.association.BurstEnabled)},
+			}
 			m.detailTable.SetRows(rows)
 			m.detailTable.SetHeight(len(rows))
 		}
 
+		// System table
+		peerText := "NONE"
+		if m.system.Association != nil {
+			peerText = m.system.Association.Srcaddr.String()
+		}
+		systemRows := []table.Row{
+			{"Peer", peerText},
+			{"Offset", ui.TableFloat(m.system.Offset)},
+			{"Jitter", ui.TableFloat(m.system.Jitter)},
+			{"Root delay", ui.TableFloat(m.system.Rootdelay)},
+			{"Root dispersion", ui.TableFloat(m.system.Rootdisp)},
+			{"Clock time", strconv.FormatUint(m.system.Clock.T, 10)},
+			{"Clock offset", ui.TableFloat(m.system.Clock.Offset)},
+			{"Clock frequency", ui.TableFloat(m.system.Clock.Freq)},
+			{"Clock State", strconv.Itoa(m.system.Clock.State)},
+		}
+		m.systemTable.SetRows(systemRows)
+		m.systemTable.SetHeight(len(systemRows))
+
 		// Association table
 		m.associationTable.SetHeight(len(m.associations))
-		rows := []table.Row{}
+		associationRows := []table.Row{}
 		for _, association := range m.associations {
 			row := table.Row{
 				association.Srcaddr.IP.String(),
@@ -185,9 +216,9 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ui.TableFloat(association.Jitter * 1e3),
 				fmt.Sprintf("%s ago", time.Duration(uint64(float64(m.system.Clock.T)-association.Update))*time.Second),
 			}
-			rows = append(rows, row)
+			associationRows = append(associationRows, row)
 		}
-		m.associationTable.SetRows(rows)
+		m.associationTable.SetRows(associationRows)
 
 		return m, nil
 	case tickMsg:
@@ -198,12 +229,21 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ntpalUIModel) View() (s string) {
-	s += ui.Title("NTPal") + "\n"
+	pageTitle := "Associations"
+	if m.paginator.OnLastPage() {
+		pageTitle = "System"
+	}
+	s += ui.Title(fmt.Sprintf("NTPal - %s", pageTitle)) + "\n"
 
 	if m.association != nil {
 		s += ui.TableBase(m.detailTable.View()) + "\n\n"
 	} else {
-		s += ui.TableBase(m.associationTable.View()) + "\n\n"
+		if m.paginator.OnLastPage() {
+			s += ui.TableBase(m.systemTable.View()) + "\n"
+		} else {
+			s += ui.TableBase(m.associationTable.View()) + "\n"
+		}
+		s += lipgloss.PlaceHorizontal(85, lipgloss.Center, m.paginator.View()) + "\n\n"
 	}
 
 	if m.daemonKillStatus != "" {
@@ -217,9 +257,19 @@ func (m ntpalUIModel) View() (s string) {
 		if m.association != nil {
 			historyAction = "back"
 		}
-		s += ui.Help(fmt.Sprintf("q: %s, esc: %s, s: stop daemon", historyAction, tableAction)) + "\n"
+		s += ui.Help(fmt.Sprintf("q: %s, esc: %s, ←/→ page, s: stop daemon", historyAction, tableAction)) + "\n"
 	}
 	return
+}
+
+func setupPaginator() paginator.Model {
+	p := paginator.New()
+	p.Type = paginator.Dots
+	p.PerPage = 1
+	p.ActiveDot = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "235", Dark: "252"}).Render("•")
+	p.InactiveDot = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "250", Dark: "238"}).Render("•")
+	p.SetTotalPages(2)
+	return p
 }
 
 func setupAssociationTable() table.Model {
