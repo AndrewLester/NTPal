@@ -23,7 +23,6 @@ type serverAssociationConfig struct {
 	burst    bool
 	iburst   bool
 	prefer   bool
-	key      int
 	version  int
 	minpoll  int
 	maxpoll  int
@@ -64,7 +63,6 @@ func parseConfig(path string) ntpConfig {
 			burst := optionalArgument("burst", &arguments)
 			iburst := optionalArgument("iburst", &arguments)
 			prefer := optionalArgument("prefer", &arguments)
-			key := integerArgument("key", -1, &arguments)
 			version := integerArgument("version", 4, &arguments)
 			minpoll := integerArgument("minpoll", defaultMinpoll, &arguments)
 			maxpoll := integerArgument("maxpoll", defaultMaxpoll, &arguments)
@@ -95,7 +93,6 @@ func parseConfig(path string) ntpConfig {
 				burst:    burst,
 				iburst:   iburst,
 				prefer:   prefer,
-				key:      key,
 				version:  version,
 				minpoll:  minpoll,
 				maxpoll:  maxpoll,

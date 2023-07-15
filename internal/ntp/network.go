@@ -18,8 +18,6 @@ type TransmitPacket struct {
 	Leap    byte         /* leap indicator */
 	Version byte         /* version number */
 	Mode    Mode         /* mode */
-	Keyid   int32        /* key ID */
-	Dgst    Digest       /* message digest */
 	NtpFieldsEncoded
 }
 

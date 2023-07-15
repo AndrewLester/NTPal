@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	EraLength     int64 = 4_294_967_296 // 2^32
-	UnixEraOffset int64 = 2_208_988_800 // 1970 - 1900 in seconds
+	EraLength     int64   = 4_294_967_296 // 2^32
+	UnixEraOffset int64   = 2_208_988_800 // 1970 - 1900 in seconds
+	ShortLength   float64 = 65536         // 2^16
 )
 
 func UnixToTime(t unix.Timeval) time.Time {

@@ -1,6 +1,6 @@
 # NTPal (Network Time Pal) &mdash; A Network Time Protocol System
 
-NTPal is an in-development, incomplete, and rough around the edges implementation of an NTP client/server process. It also supports NTP symmetric mode, like any good friend would.
+NTPal is an in-development, incomplete, and rough around the edges implementation of an NTP client/server process.
 
 ## Code Credits
 
@@ -22,7 +22,7 @@ The server is hosted on [fly.io](https://fly.io/) with a configuration outlined 
 
 NTPal uses a configuration format similar to the [standard `ntpd` config](https://docs.ntpsec.org/latest/ntp_conf.html), but with far fewer options. The available commands, with arguments defined in the `ntpd` config docs, are as follows:
 
--   `server <address> [key _key_] [burst] [iburst] [version _version_] [prefer] [minpoll _minpoll_] [maxpoll _maxpoll_]`
+-   `server <address> [burst] [iburst] [version _version_] [prefer] [minpoll _minpoll_] [maxpoll _maxpoll_]`
 -   `driftfile <path>`
 
 Some environment variables are also available to configure the application's runtime and logging:

@@ -40,7 +40,6 @@ func (system *NTPalSystem) Query(address string, messages int) (*QueryResult, er
 					Srcaddr: addr,
 					Dstaddr: system.address,
 					Version: VERSION,
-					Keyid:   0,
 				},
 			},
 		},

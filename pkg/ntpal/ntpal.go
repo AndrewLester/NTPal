@@ -19,7 +19,7 @@ import (
 
 const VERSION byte = 4     // NTP version number
 const TOLERANCE = 15e-6    //frequency tolerance PHI (s/s)
-const MINPOLL int8 = 3     //minimum poll exponent (64 s)
+const MINPOLL int8 = 3     //minimum poll exponent (8 s)
 const MAXPOLL int8 = 17    // maximum poll exponent (36 h)
 const MAXDISP float64 = 16 // maximum dispersion (16 s)
 const MINDISP = 0.005      // minimum dispersion increment (s)
@@ -27,15 +27,13 @@ const NOSYNC byte = 0x3    // leap unsync
 const MAXDIST byte = 1     // distance threshold (1 s)
 const MAXSTRAT byte = 16   // maximum stratum number
 
-const NTPShortLength float64 = 65536 // 2^16
-
 const SGATE = 3     /* spike gate (clock Filter */
 const BDELAY = .004 /* broadcast delay (s) */
-const PHI = 15e-6   /* % frequency tolerance (15 ppm) */
+const PHI = 15e-6   /* frequency tolerance (15 ppm) */
 const NSTAGE = 8    /* clock Register stages */
 const NMAX = 50     /* maximum number of peers */
-const NSANE = 1     /* % minimum intersection survivors */
-const NMIN = 3      /* % minimum cluster survivors */
+const NSANE = 1     /* minimum intersection survivors */
+const NMIN = 3      /* minimum cluster survivors */
 const NTP_FWEIGHT = 0.5
 const UNREACH = 8 /* unreach counter threshold */
 const BCOUNT = 8  /* packets in a burst */
@@ -63,11 +61,11 @@ const PRECISION = -18 /* precision (log2 s)  */
 const STARTUP_OFFSET_MAX = 5e-4
 
 const (
-	NSET int = iota /* clock Never set */
-	FSET            /* frequency set from file */
-	SPIK            /* spike detected */
-	FREQ            /* frequency mode */
-	SYNC            /* clock Synchronized */
+	NSET int = iota
+	FSET
+	SPIK
+	FREQ
+	SYNC
 )
 
 type DispatchCode int
@@ -86,24 +84,24 @@ const (
 type AssociationStateCode byte
 
 const (
-	INIT   AssociationStateCode = iota /* initialization */
-	STALE                              /* timeout */
-	STEP                               /* time step */
-	ERROR                              /* authentication error */
-	CRYPTO                             /* crypto-NAK received */
-	NKEY                               /* untrusted key */
+	INIT AssociationStateCode = iota
+	STALE
+	STEP
+	ERROR
+	CRYPTO
+	NKEY
 )
 
 type LocalClockReturnCode int
 
 const (
-	IGNORE LocalClockReturnCode = iota /* ignore */
-	SLEW                               /* slew adjustment */
-	LSTEP                              /* step adjustment  TODO: RENAME THIS BACK TO STEP */
-	PANIC                              /* panic - no adjustment */
+	IGNORE LocalClockReturnCode = iota
+	SLEW
+	LSTEP
+	PANIC
 )
 
-// Index with [associationMode][packetMOde]
+// Index with [associationMode][packetMode]
 var dispatchTable = [][]DispatchCode{
 	{NEWPS, DSCRD, FXMIT, MANY, NEWBC},
 	{PROC, PROC, DSCRD, DSCRD, DSCRD},
@@ -141,8 +139,7 @@ type NTPalSystem struct {
 	drift  string
 	config string
 
-	lock sync.Mutex
-	wg   sync.WaitGroup
+	wg sync.WaitGroup
 
 	hold int64
 
@@ -160,16 +157,9 @@ type Association struct {
 	hmode ntp.Mode // HOST (Self) mode
 
 	ntp.Association
-
-	/*
-	 * Computed data
-	 */
 	t float64             /* clock.T of last used sample */
 	f [NSTAGE]FilterStage /* clock Filter */
 
-	/*
-	 * Poll process variables
-	 */
 	burst    int
 	ttl      int
 	unreach  int
@@ -182,10 +172,10 @@ type Association struct {
 	ephemeral bool
 }
 
-type Chime struct { /* m is for Marzullo */
-	association *Association /* peer structure pointer */
-	levelType   int          /* high +1, mid 0, low -1 */
-	edge        float64      /* correctness interval edge */
+type Chime struct {
+	association *Association
+	levelType   int
+	edge        float64
 }
 
 type Chimers []Chime
@@ -324,7 +314,6 @@ func (system *NTPalSystem) setupAssociations(associationConfigs []serverAssociat
 						Srcaddr: associationConfig.address,
 						Dstaddr: system.address,
 						Version: byte(associationConfig.version),
-						Keyid:   int32(associationConfig.key),
 					},
 				},
 			},
@@ -389,26 +378,11 @@ func (system *NTPalSystem) setupServer() {
 }
 
 func (system *NTPalSystem) clockAdjust() {
-	/*
-	 * Update the process time c.t.  Also increase the dispersion
-	 * since the last update.  In contrast to NTPv3, NTPv4 does not
-	 * declare unsynchronized after one day, since the dispersion
-	 * threshold serves this function.  When the dispersion exceeds
-	 * MAXDIST (1 s), the server is considered unfit for
-	 * synchronization.
-	 */
 	system.Clock.lock.Lock()
 
 	system.Clock.T++
 	system.Rootdisp += PHI
 
-	/*
-	 * Implement the phase and frequency adjustments.  The gain
-	 * factor (denominator) is not allowed to increase beyond the
-	 * Allan intercept.  It doesn't make sense to average phase
-	 * noise beyond this point and it helps to damp residual offset
-	 * at the longer poll intervals.
-	 */
 	dtemp := system.Clock.Offset / (float64(PLL) * ntp.Log2ToDouble(system.poll))
 	if system.Clock.State != SYNC {
 		dtemp = 0
@@ -417,11 +391,6 @@ func (system *NTPalSystem) clockAdjust() {
 		system.hold--
 	}
 
-	/*
-	* This is the kernel adjust time function, usually implemented
-	* by the Unix adjtime() system call.
-	 */
-	//  TODO: Might need to wrap this in system.hold == 0 ??
 	system.Clock.Offset -= dtemp
 	debug("*****ADJUSTING:")
 	debug("TIME:", system.Clock.T, "SYS OFFSET:", system.Offset, "CLOCK OFFSET:", system.Clock.Offset)
@@ -430,10 +399,6 @@ func (system *NTPalSystem) clockAdjust() {
 
 	system.Clock.lock.Unlock()
 
-	/*
-	 * Peer timer.  Call the poll() routine when the poll timer
-	 * expires.
-	 */
 	for _, association := range system.associations {
 		if system.Clock.T >= ntp.TimestampEncoded(association.nextdate) {
 			info("sendPoll:", association.Srcaddr.IP)
@@ -498,14 +463,6 @@ func (system *NTPalSystem) clockAdjust() {
 }
 
 func (system *NTPalSystem) sendPoll(association *Association) {
-	/*
-	 * This routine is called when the current time c.t catches up
-	 * to the next poll time p->nextdate.  The value p->outdate is
-	 * the last time this routine was executed.  The poll_update()
-	 * routine determines the next execution time p->nextdate.
-	 *
-	 * If broadcasting, just do it, but only if we are synchronized.
-	 */
 	hpoll := association.Hpoll
 	if association.hmode == ntp.BROADCAST_SERVER {
 		association.outdate = int32(system.Clock.T)
@@ -516,13 +473,6 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 		return
 	}
 
-	/*
-	 * If manycasting, start with ttl = 1.  The ttl is increased by
-	 * one for each poll until MAXCLOCK Servers have been found or
-	 * ttl reaches TTLMAX.  If reaching MAXCLOCK, stop polling until
-	 * the number of servers falls below MINCLOCK, then start all
-	 * over.
-	 */
 	if association.hmode == ntp.CLIENT && association.isMany {
 		association.outdate = int32(system.Clock.T)
 		if association.unreach > BEACON {
@@ -542,27 +492,11 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 	}
 
 	if association.burst == 0 {
-		/*
-		 * We are not in a burst.  Shift the reachability
-		 * register to the left.  Hopefully, some time before
-		 * the next poll a packet Will arrive and set the
-		 * rightmost bit.
-		 */
-
 		association.outdate = int32(system.Clock.T)
 		association.Reach = association.Reach << 1
 
-		// Unreachable
 		if association.Reach == 0 {
 			system.clockFilter(association, 0, 0, MAXDISP)
-			/*
-			 * The server is unreachable, so bump the
-			 * unreach counter.  If the unreach threshold
-			 * has been reached, double the poll interval
-			 * to minimize wasted network traffic.  Send a
-			 * burst only if enabled and the unreach
-			 * threshold has not been reached.
-			 */
 			if association.IburstEnabled && association.unreach == 0 {
 				association.burst = BCOUNT
 			}
@@ -571,7 +505,7 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 				association.unreach++
 			} else {
 				// Try to get a new IP
-				addr, err := net.ResolveUDPAddr("udp", association.Hostname+":123")
+				addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(association.Hostname, ntp.Port))
 				if err != nil {
 					log.Fatal("Invalid address: ", association.Hostname)
 				}
@@ -582,11 +516,6 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 				association.unreach = 0
 			}
 		} else {
-			/*
-			 * The server is reachable.  Set the poll
-			 * interval to the system poll interval.  Send a
-			 * burst only if enabled and the peer is fit.
-			 */
 			association.unreach = 0
 			hpoll = system.poll
 			if association.BurstEnabled && system.fit(association) {
@@ -594,16 +523,9 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 			}
 		}
 	} else {
-		/*
-		 * If in a burst, count it down.  When the reply comes
-		 * back the clock_Filter() routine will call
-		 * clock_Select() to process the results of the burst.
-		 */
 		association.burst--
 	}
-	/*
-	 * Do not transmit if in broadcast client mode.
-	 */
+
 	if association.hmode != ntp.BROADCAST_CLIENT {
 		system.pollPeer(association)
 	}
@@ -637,17 +559,7 @@ func (system *NTPalSystem) receive(packet ntp.ReceivePacket) *ntp.TransmitPacket
 	switch dispatchTable[hmode][packet.Mode-1] {
 	case FXMIT:
 		info("Received request to sync from:", packet.Srcaddr.IP)
-		// If the destination address is not a broadcast
-		//    address
-
-		/* not multicast dstaddr */
-
-		// ignore auth
-		// if (AUTH(p->flags & P_NOTRUST, auth))
 		return system.reply(packet, ntp.SERVER)
-		// else if (auth == A_ERROR)
-		// 		fast_xmit(r, M_SERV, A_CRYPTO);
-		// return;         /* M_SERV packet Sent */
 	case NEWPS:
 		if !isSymmetricEnabled() {
 			return nil
@@ -694,9 +606,9 @@ func (system *NTPalSystem) receive(packet ntp.ReceivePacket) *ntp.TransmitPacket
 }
 
 func (system *NTPalSystem) process(association *Association, packet ntp.ReceivePacket) {
-	var offset float64 /* sample offsset */
-	var delay float64  /* sample delay */
-	var disp float64   /* sample dispersion */
+	var offset float64
+	var delay float64
+	var disp float64
 
 	kod := false
 
@@ -731,8 +643,8 @@ func (system *NTPalSystem) process(association *Association, packet ntp.ReceiveP
 		association.Stratum = packet.Stratum
 	}
 	association.Mode = packet.Mode
-	association.Rootdelay = float64(packet.Rootdelay) / NTPShortLength
-	association.Rootdisp = float64(packet.Rootdisp) / NTPShortLength
+	association.Rootdelay = float64(packet.Rootdelay) / ntp.ShortLength
+	association.Rootdisp = float64(packet.Rootdisp) / ntp.ShortLength
 	association.Refid = packet.Refid
 	association.Reftime = packet.Reftime
 
@@ -744,28 +656,12 @@ func (system *NTPalSystem) process(association *Association, packet ntp.ReceiveP
 
 	if association.Rootdelay/2+association.Rootdisp >= MAXDISP || association.Reftime >
 		packet.Xmt {
-
-		return /* invalid header values */
+		return
 	}
 
 	system.pollUpdate(association, association.Hpoll)
 	association.Reach |= 1
 
-	/*
-	 * Calculate offset, delay and dispersion, then pass to the
-	 * clock Filter.  Note carefully the implied processing.  The
-	 * first-order difference is done directly in 64-bit arithmetic,
-	 * then the result is converted to floating double.  All further
-	 * processing is in floating-double arithmetic with rounding
-	 * done by the hardware.  This is necessary in order to avoid
-	 * overflow and preserve precision.
-	 *
-	 * The delay calculation is a special case.  In cases where the
-	 * server and client clocks are running at different rates and
-	 * with very fast networks, the delay can appear negative.  In
-	 * order to avoid violating the Principle of Least Astonishment,
-	 * the delay is clamped not less than the system precision.
-	 */
 	if association.Mode == ntp.BROADCAST_SERVER {
 		offset = ntp.NTPTimestampDifferenceToDouble(int64(packet.Xmt - packet.Dst))
 		delay = BDELAY
@@ -788,11 +684,9 @@ func (system *NTPalSystem) process(association *Association, packet ntp.ReceiveP
 	system.clockFilter(association, offset, delay, disp)
 }
 
-// TODO: Add auth
 func (system *NTPalSystem) reply(receivePacket ntp.ReceivePacket, mode ntp.Mode) *ntp.TransmitPacket {
-	var transmitPacket ntp.TransmitPacket
+	transmitPacket := receivePacket.TransmitPacket
 
-	transmitPacket.Version = receivePacket.Version
 	transmitPacket.Srcaddr = receivePacket.Dstaddr
 	transmitPacket.Dstaddr = receivePacket.Srcaddr
 	transmitPacket.Leap = system.Leap
@@ -802,44 +696,24 @@ func (system *NTPalSystem) reply(receivePacket ntp.ReceivePacket, mode ntp.Mode)
 	} else {
 		transmitPacket.Stratum = system.stratum
 	}
-	transmitPacket.Poll = receivePacket.Poll
 	transmitPacket.Precision = system.precision
-	transmitPacket.Rootdelay = ntp.ShortEncoded(system.Rootdelay * NTPShortLength)
-	transmitPacket.Rootdisp = ntp.ShortEncoded(system.Rootdisp * NTPShortLength)
+	transmitPacket.Rootdelay = ntp.ShortEncoded(system.Rootdelay * ntp.ShortLength)
+	transmitPacket.Rootdisp = ntp.ShortEncoded(system.Rootdisp * ntp.ShortLength)
 	transmitPacket.Refid = system.refid
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = receivePacket.Xmt
 	transmitPacket.Rec = receivePacket.Dst
 	transmitPacket.Xmt = GetSystemTime()
 
-	/*
-	 * If the authentication code is A.NONE, include only the
-	 * header; if A.CRYPTO, send a crypto-NAK; if A.OK, send a valid
-	 * MAC.  Use the key ID in the received packet And the key in
-	 * the local key cache.
-	 */
-	// 	 if (auth != A_NONE) {
-	// 		if (auth == A_CRYPTO) {
-	// 				x.keyid = 0;
-	// 		} else {
-	// 				x.keyid = r->keyid;
-	// 				x.dgst = md5(x.keyid);
-	// 		}
-	// }
-
 	return &transmitPacket
 }
 
 func (system *NTPalSystem) pollPeer(association *Association) {
-	var transmitPacket ntp.TransmitPacket
+	transmitPacket := association.TransmitPacket
 
-	/*
-	 * Initialize header and transmit timestamp
-	 */
 	transmitPacket.Srcaddr = association.Dstaddr
 	transmitPacket.Dstaddr = association.Srcaddr
 	transmitPacket.Leap = system.Leap
-	transmitPacket.Version = association.Version
 	transmitPacket.Mode = association.hmode
 	if system.stratum == MAXSTRAT {
 		transmitPacket.Stratum = 0
@@ -848,36 +722,19 @@ func (system *NTPalSystem) pollPeer(association *Association) {
 	}
 	transmitPacket.Poll = association.Hpoll
 	transmitPacket.Precision = system.precision
-	transmitPacket.Rootdelay = ntp.ShortEncoded(system.Rootdelay * NTPShortLength)
-	transmitPacket.Rootdisp = ntp.ShortEncoded(system.Rootdisp * NTPShortLength)
+	transmitPacket.Rootdelay = ntp.ShortEncoded(system.Rootdelay * ntp.ShortLength)
+	transmitPacket.Rootdisp = ntp.ShortEncoded(system.Rootdisp * ntp.ShortLength)
 	transmitPacket.Refid = system.refid
 	transmitPacket.Reftime = system.reftime
 	transmitPacket.Org = association.Org
 	transmitPacket.Rec = association.Rec
-
-	// Xmt set lower down
-
-	/*
-	 * If the key ID is nonzero, send a valid MAC using the key ID
-	 * of the association and the key in the local key cache.  If
-	 * something breaks, like a missing trusted key, don't send the
-	 * packet; just reset the association and stop until the problem
-	 * is fixed.
-	 */
-	if association.Keyid != 0 {
-		// if (/* p->keyid invalid */ 0) {
-		//         clear(p, X_NKEY);
-		//         return;
-		// }
-		// x.dgst = md5(p->keyid);
-	}
 
 	transmitPacket.Xmt = GetSystemTime()
 	association.Xmt = transmitPacket.Xmt
 
 	_, err := system.conn.WriteTo(ntp.EncodeTransmitPacket(transmitPacket), transmitPacket.Dstaddr)
 	if err != nil {
-		fmt.Println("Error", err)
+		info("Write to error:", err)
 	}
 }
 
@@ -890,8 +747,6 @@ func (system *NTPalSystem) pollUpdate(association *Association, poll int8) {
 			association.nextdate += BTIME
 		}
 	} else {
-		// info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
-		// 	float64(association.Hpoll)), float64(MINPOLL))), association.Poll, association.Hpoll)
 		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
 			float64(association.Hpoll)), float64(MINPOLL))))
 	}
@@ -902,14 +757,6 @@ func (system *NTPalSystem) pollUpdate(association *Association, poll int8) {
 }
 
 func (system *NTPalSystem) clear(association *Association, kiss AssociationStateCode) {
-	/*
-	 * The first thing to do is return all resources to the bank.
-	 * Typical resources are not detailed here, but they include
-	 * dynamically allocated structures for keys, certificates, etc.
-	 * If an ephemeral association and not initialization, return
-	 * the association memory as well.
-	 */
-	/* return resources */
 	if system.Association == association {
 		system.updateAssociation(nil)
 	}
@@ -949,11 +796,6 @@ func (system *NTPalSystem) clear(association *Association, kiss AssociationState
 		association.f[i].delay = MAXDISP
 	}
 
-	/*
-	 * Randomize the first poll just in case thousands of broadcast
-	 * clients have just been stirred up after a long absence of the
-	 * broadcast server.
-	 */
 	association.t = float64(system.Clock.T)
 	association.Update = float64(system.Clock.T)
 	association.outdate = int32(association.t)
@@ -963,15 +805,6 @@ func (system *NTPalSystem) clear(association *Association, kiss AssociationState
 func (system *NTPalSystem) clockFilter(association *Association, offset float64, delay float64, disp float64) {
 	var f FilterStages
 
-	/*
-	 * The clock Filter contents consist of eight tuples (offset,
-	 * delay, dispersion, time).  Shift each tuple to the left,
-	 * discarding the leftmost one.  As each tuple is shifted,
-	 * increase the dispersion since the last filter update.  At the
-	 * same time, copy each tuple to a temporary list.  After this,
-	 * place the (offset, delay, disp, time) in the vacated
-	 * rightmost tuple.
-	 */
 	dtemp := PHI * (float64(system.Clock.T) - association.Update)
 	association.Update = float64(system.Clock.T)
 	for i := NSTAGE - 1; i > 0; i-- {
@@ -1032,24 +865,12 @@ func (system *NTPalSystem) clockFilter(association *Association, offset float64,
 		system.filtered <- 0
 	}
 
-	/*
-	 * Popcorn spike suppressor.  Compare the difference between the
-	 * last and current offsets to the current jitter.  If greater
-	 * than SGATE (3) and if the interval since the last offset is
-	 * less than twice the system poll interval, dump the spike.
-	 * Otherwise, and if not in a burst, shake out the truechimers.
-	 */
 	if association.Disp < float64(MAXDIST) && f[0].disp < float64(MAXDIST) && etemp > SGATE*association.Jitter && (float64(f[0].t)-
 		association.t) < float64(2*ntp.Log2ToDouble(association.Hpoll)) {
 		info("Popcorn spike suppresor failed, either offset change WAY above jitter or disp too high")
 		return
 	}
 
-	/*
-	 * Prime directive: use a sample only once and never a sample
-	 * older than the latest one, but anything goes before first
-	 * synchronized.
-	 */
 	if float64(f[0].t) <= association.t && system.Leap != NOSYNC {
 		return
 	}
@@ -1061,18 +882,6 @@ func (system *NTPalSystem) clockFilter(association *Association, offset float64,
 }
 
 func (system *NTPalSystem) clockSelect() {
-	/*
-	 * We first cull the falsetickers from the server population,
-	 * leaving only the truechimers.  The correctness interval for
-	 * association p is the interval from offset - root_dist() to
-	 * offset + root_dist().  The object of the game is to find a
-	 * majority clique; that is, an intersection of correctness
-	 * intervals numbering more than half the server population.
-	 *
-	 * First, construct the chime list of tuples (p, type, edge) as
-	 * shown below, then sort the list by edge from lowest to
-	 * highest.
-	 */
 	osys := system.Association
 	system.updateAssociation(nil)
 
@@ -1105,21 +914,10 @@ func (system *NTPalSystem) clockSelect() {
 
 	sort.Sort(ByEdge{system.m})
 
-	/*
-	 * Find the largest contiguous intersection of correctness
-	 * intervals.  Allow is the number of allowed falsetickers;
-	 * found is the number of midpoints.  Note that the edge values
-	 * are limited to the range +-(2 ^ 30) < +-2e9 by the timestamp
-	 * calculations.
-	 */
 	m := len(system.associations)
 	low := 2e9
 	high := -2e9
 	for allow := 0; 2*allow < m; allow++ {
-		/*
-		 * Scan the chime list from lowest to highest to find
-		 * the lower endpoint.
-		 */
 		found := 0
 		chime := 0
 		for i := 0; i < n; i++ {
@@ -1133,10 +931,6 @@ func (system *NTPalSystem) clockSelect() {
 			}
 		}
 
-		/*
-		 * Scan the chime list from highest to lowest to find
-		 * the upper endpoint.
-		 */
 		chime = 0
 		for i := n - 1; i >= 0; i-- {
 			chime += system.m[i].levelType
@@ -1149,14 +943,6 @@ func (system *NTPalSystem) clockSelect() {
 			}
 		}
 
-		/*
-		 * If the number of midpoints is greater than the number
-		 * of allowed falsetickers, the intersection contains at
-		 * least one truechimer with no midpoint.  If so,
-		 * increment the number of allowed falsetickers and go
-		 * around again.  If not and the intersection is
-		 * non-empty, declare success.
-		 */
 		if found > allow {
 			continue
 		}
@@ -1170,12 +956,6 @@ func (system *NTPalSystem) clockSelect() {
 		return
 	}
 
-	/*
-	 * Clustering algorithm.  Construct a list of survivors (p,
-	 * metric) from the chime list, where metric is dominated first
-	 * by stratum and then by root distance.  All other things being
-	 * equal, this is the order of preference.
-	 */
 	system.n = 0
 	system.v = []Survivor{}
 	for i := 0; i < n; i++ {
@@ -1191,25 +971,12 @@ func (system *NTPalSystem) clockSelect() {
 		system.n++
 	}
 
-	/*
-	 * There must be at least NSANE survivors to satisfy the
-	 * correctness assertions.  Ordinarily, the Byzantine criteria
-	 * require four survivors, but for the demonstration here, one
-	 * is acceptable.
-	 */
 	if system.n < NSANE {
 		return
 	}
 
 	sort.Sort(ByMetric{system.v})
 
-	/*
-	 * For each association p in turn, calculate the selection
-	 * jitter p->sjitter as the square root of the sum of squares
-	 * (p->offset - q->offset) over all q associations.  The idea is
-	 * to repeatedly discard the survivor with maximum selection
-	 * jitter until a termination condition is met.
-	 */
 	for {
 		var sjitterMaxIdx int
 		var max, min, dtemp float64
@@ -1236,33 +1003,14 @@ func (system *NTPalSystem) clockSelect() {
 			}
 		}
 
-		/*
-		 * If the maximum selection jitter is less than the
-		 * minimum peer jitter, then tossing out more survivors
-		 * will not lower the minimum peer jitter, so we might
-		 * as well stop.  To make sure a few survivors are left
-		 * for the clustering algorithm to chew on, we also stop
-		 * if the number of survivors is less than or equal to
-		 * NMIN (3).
-		 */
 		if max < min || n <= NMIN {
 			break
 		}
 
-		/*
-		 * Delete survivor with max sjitter from the list and go around
-		 * again.
-		 */
 		removeIndex(&system.v, sjitterMaxIdx)
 		system.n--
 	}
 
-	/*
-	 * Pick the best clock.  If the old system peer is on the list
-	 * and at the same stratum as the first survivor on the list,
-	 * then don't do a clock Hop.  Otherwise, select the first
-	 * survivor on the list as the new system peer.
-	 */
 	if osys != nil && osys.Stratum == system.v[0].association.Stratum && containsAssociation(system.v, osys) {
 		system.updateAssociation(osys)
 	} else {
@@ -1274,44 +1022,16 @@ func (system *NTPalSystem) clockSelect() {
 }
 
 func (system *NTPalSystem) clockUpdate(association *Association) {
-	info("Clock Update**")
-	/*
-	 * If this is an old update, for instance, as the result of a
-	 * system peer change, avoid it.  We never use an old sample or
-	 * the same sample twice.
-	 */
 	if float64(system.t) >= association.t {
 		return
 	}
 
-	/*
-	 * Combine the survivor offsets and update the system clock; the
-	 * local_clock() routine will tell us the good or bad news.
-	 */
 	system.clockCombine()
 	switch system.localClock(association, system.Offset) {
-	/*
-	 * The offset is too large and probably bogus.  Complain to the
-	 * system log and order the operator to set the clock Manually
-	 * within PANIC range.  The reference implementation includes a
-	 * command line option to disable this check and to change the
-	 * panic threshold from the default 1000 s as required.
-	 */
-	//   TODO: Above^
 	case PANIC:
 		debug("Offset:", system.Offset)
 		log.Fatal("Offset too large!")
 
-	/*
-	 * The offset is more than the step threshold (0.125 s by
-	 * default).  After a step, all associations now have
-	 * inconsistent time values, so they are reset and started
-	 * fresh.  The step threshold can be changed in the reference
-	 * implementation in order to lessen the chance the clock Might
-	 * be stepped backwards.  However, there may be serious
-	 * consequences, as noted in the white papers at the NTP project
-	 * site.
-	 */
 	case LSTEP:
 		info("Discipline STEPPED")
 		system.t = uint64(association.t)
@@ -1324,14 +1044,6 @@ func (system *NTPalSystem) clockUpdate(association *Association) {
 		system.Rootdisp = 0
 		system.Jitter = ntp.Log2ToDouble(system.precision)
 
-	/*
-	 * The offset was less than the step threshold, which is the
-	 * normal case.  Update the system variables from the peer
-	 * variables.  The lower clamp on the dispersion increase is to
-	 * avoid timing loops and clockhOpping when highly precise
-	 * sources are in play.  The clamp can be changed from the
-	 * default .01 s in the reference implementation.
-	 */
 	case SLEW:
 		info("Discipline SLEWED")
 		// Offset and jitter already set by clockCombine()
@@ -1349,36 +1061,19 @@ func (system *NTPalSystem) clockUpdate(association *Association) {
 			math.Abs(association.Offset), MINDISP)
 		system.Rootdisp = dtemp
 		fmt.Println("Root disp calc:", association.Disp, association.Rootdisp)
-	/*
-	 * Some samples are discarded while, for instance, a direct
-	 * frequency measurement is being made.
-	 */
+
 	case IGNORE:
 		info("Discipline IGNORED")
 	}
 }
 
 func (system *NTPalSystem) clockCombine() {
-	var association *Association
-	var x, y, z, w float64
-
-	/*
-	 * Combine the offsets of the clustering algorithm survivors
-	 * using a weighted average with weight determined by the root
-	 * distance.  Compute the selection jitter as the weighted RMS
-	 * difference between the first survivor and the remaining
-	 * survivors.  In some cases, the inherent clock Jitter can be
-	 * reduced by not using this algorithm, especially when frequent
-	 * clockhOpping is involved.  The reference implementation can
-	 * be configured to avoid this algorithm by designating a
-	 * preferred peer.
-	 */
-	w = 0
-	z = w
-	y = z
+	var w float64
+	z := w
+	y := z
 	for i := 0; i < len(system.v) && system.v[i].association != nil; i++ {
-		association = system.v[i].association
-		x = system.rootDist(association)
+		association := system.v[i].association
+		x := system.rootDist(association)
 		y += 1 / x
 		z += association.Offset / x
 		w += math.Pow(association.Offset-system.v[0].association.Offset, 2) / x
@@ -1387,44 +1082,25 @@ func (system *NTPalSystem) clockCombine() {
 	system.Jitter = math.Sqrt(w / y)
 }
 
-func (system *NTPalSystem) localClock(association *Association, offset float64) LocalClockReturnCode {
+func (system *NTPalSystem) localClock(association *Association, offset float64) (rval LocalClockReturnCode) {
 	system.Clock.lock.Lock()
 	defer system.Clock.lock.Unlock()
-
-	var freq, mu float64
-	var rval LocalClockReturnCode
-	var etemp, dtemp float64
 
 	if math.Abs(offset) > PANICT {
 		return PANIC
 	}
 
-	/*
-	 * Clock State machine transition function.  This is where the
-	 * action is and defines how the system reacts to large time
-	 * and frequency errors.  There are two main regimes: when the
-	 * offset exceeds the step threshold and when it does not.
-	 */
 	rval = SLEW
-	mu = association.t - float64(system.t)
-	freq = 0
+
+	var freq float64
+	mu := association.t - float64(system.t)
 	info("Disciplining with offset:", offset)
 	if math.Abs(offset) > STEPT {
 		switch system.Clock.State {
-		/*
-		 * In S_SYNC state, we ignore the first outlier and
-		 * switch to S_SPIK state.
-		 */
 		case SYNC:
 			system.Clock.State = SPIK
-			return rval
+			return
 
-		/*
-		 * In S_FREQ state, we ignore outliers and inliers.  At
-		 * the first outlier after the stepout threshold,
-		 * compute the apparent frequency correction and step
-		 * the time.
-		 */
 		case FREQ:
 			if mu < WATCH {
 				return IGNORE
@@ -1432,85 +1108,33 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 
 			freq = (offset - system.Clock.Offset) / mu
 			fallthrough
-
-		/*
-		 * In S_SPIK state, we ignore succeeding outliers until
-		 * either an inlier is found or the stepout threshold is
-		 * exceeded.
-		 */
 		case SPIK:
 			if mu < WATCH {
 				return IGNORE
 			}
 
-			/* fall through to default */
 			fallthrough
-
-		/*
-		 * We get here by default in S_NSET and S_FSET states
-		 * and from above in S_FREQ state.  Step the time and
-		 * clamp down the poll interval.
-		 *
-		 * In S_NSET state, an initial frequency correction is
-		 * not available, usually because the frequency file has
-		 * not yet been written.  Since the time is outside the
-		 * capture range, the clock Is stepped.  The frequency
-		 * will be set directly following the stepout interval.
-		 *
-		 * In S_FSET state, the initial frequency has been set
-		 * from the frequency file.  Since the time is outside
-		 * the capture range, the clock Is stepped immediately,
-		 * rather than after the stepout interval.  Guys get
-		 * nervous if it takes 17 minutes to set the clock For
-
-		 * the first time.
-		 *
-		 * In S_SPIK state, the stepout threshold has expired
-		 * and the phase is still above the step threshold.
-		 * Note that a single spike greater than the step
-		 * threshold is always suppressed, even at the longer
-		 * poll intervals.
-		 */
 		default:
-			/*
-			 * This is the kernel set time function, usually
-			 * implemented by the Unix settimeofday() system
-			 * call.
-			 */
 			stepTime(offset)
 			system.Clock.Count = 0
 			system.poll = association.minpoll
 			rval = LSTEP
-			// Initialize hold timer for training and startup intervals
 			if system.Clock.State == NSET || system.Clock.State == FSET {
 				system.hold = WATCH
 			}
 
 			if system.Clock.State == NSET {
 				system.rstclock(FREQ, association.t, 0)
-				return rval
+				return
 			}
 		}
 		system.rstclock(SYNC, association.t, 0)
 	} else {
-		// fmt.Println("OFFSET < STEPT (0.128)", "|STATE:", system.Clock.State, "|OFFSET:", offset)
-		/*
-		* Compute the clock Jitter as the RMS of exponentially
-		* weighted offset differences.  This is used by the
-		* poll-adjust code.
-		 */
-		etemp = math.Pow(system.Clock.Jitter, 2)
-		dtemp = math.Pow(math.Max(math.Abs(offset-system.Clock.Last),
+		etemp := math.Pow(system.Clock.Jitter, 2)
+		dtemp := math.Pow(math.Max(math.Abs(offset-system.Clock.Last),
 			ntp.Log2ToDouble(system.precision)), 2)
 		system.Clock.Jitter = math.Sqrt(etemp + (dtemp-etemp)/AVG)
 		switch system.Clock.State {
-
-		/*
-		 * In S_NSET state, this is the first update received
-		 * and the frequency has not been initialized.  The
-		 * first thing to do is directly measure the oscillator
-		 * frequency.
-		 */
 		case NSET:
 			// Perform a step, despite offset < STEPT. The reason for this is that adjustTime
 			// would mess up the frequency measurement in the next clock State.
@@ -1521,17 +1145,8 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 			system.rstclock(FREQ, association.t, 0)
 			return LSTEP
 
-		/*
-		 * In S_FREQ state, ignore updates until the stepout
-		 * threshold.  After that, correct the phase and
-		 * frequency and switch to S_SYNC state.
-		 */
 		case FREQ:
 			if mu < WATCH {
-				// An addition to help better find the initial frequency, since sometimes the step is bad
-				// if system.Clock.Offset == 0 {
-				// 	system.Clock.Offset = offset
-				// }
 				return IGNORE
 			}
 
@@ -1539,34 +1154,14 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 			freq = (offset - system.Clock.Offset) / mu
 
 			fallthrough
-
-		/*
-		 * We get here by default in S_SYNC and S_SPIK states.
-		 * Here we compute the frequency update due to PLL and
-		 * FLL contributions.
-		 */
 		default:
-
-			/*
-			 * The FLL and PLL frequency gain constants
-			 * depending on the poll interval and Allan
-			 * intercept.  The FLL is not used below one
-			 * half the Allan intercept.  Above that the
-			 * loop gain increases in steps to 1 / AVG.
-			 */
-			//  TODO: re-add this?
 			if system.hold == 0 {
 				if ntp.Log2ToDouble(system.poll) > ALLAN {
+					// FLL
 					freq += (offset - system.Clock.Offset) / (FLL * math.Max(mu, float64(system.poll)))
 
 					info("FREQ update (FLL):", freq)
 				}
-				/*
-				 * For the PLL the integration interval
-				 * (numerator) is the minimum of the update
-				 * interval and poll interval.  This allows
-				 * oversampling, but not undersampling.
-				 */
 
 				//  PLL
 				etemp = math.Min(mu, ALLAN)
@@ -1582,31 +1177,16 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 		system.rstclock(SYNC, association.t, offset)
 	}
 
-	/*
-	 * Calculate the new frequency and frequency stability (wander).
-	 * Compute the clock Wander as the RMS of exponentially weighted
-	 * frequency differences.  This is not used directly, but can,
-	 * along with the jitter, be a highly useful monitoring and
-	 * debugging tool.
-	 */
 	freq += system.Clock.Freq
 	system.Clock.Freq = math.Max(math.Min(MAXFREQ, freq), -MAXFREQ)
 	info("Set FREQ to:", system.Clock.Freq)
-	etemp = math.Pow(system.Clock.Wander, 2)
-	dtemp = math.Pow(freq, 2)
+	etemp := math.Pow(system.Clock.Wander, 2)
+	dtemp := math.Pow(freq, 2)
 	system.Clock.Wander = math.Sqrt(etemp + (dtemp-etemp)/AVG)
 
-	/*
-	 * Here we adjust the poll interval by comparing the current
-	 * offset with the clock Jitter.  If the offset is less than the
-	 * clock Jitter times a constant, then the averaging interval is
-	 * increased; otherwise, it is decreased.  A bit of hysteresis
-	 * helps calm the dance.  Works best using burst mode.
-	 */
-	// fmt.Println("CLOCK OFFSET:", system.Clock.Offset, "PGATE*system.Clock.Jitter:", PGATE*system.Clock.Jitter)
 	if system.hold > 0 {
 		system.Clock.Count = 0
-		return rval
+		return
 	}
 
 	if math.Abs(system.Clock.Offset) < PGATE*system.Clock.Jitter {
@@ -1629,56 +1209,30 @@ func (system *NTPalSystem) localClock(association *Association, offset float64) 
 			}
 		}
 	}
-	return rval
+
+	return
 }
 
 func (system *NTPalSystem) rstclock(state int, t, offset float64) {
-	/*
-	 * Enter new state and set state variables.  Note, we use the
-	 * time of the last clock Filter sample, which must be earlier
-	 * than the current time.
-	 */
 	system.Clock.State = state
 	system.Clock.Last = system.Clock.Offset
 	system.Clock.Offset = offset
 	system.t = uint64(t)
 }
 
-/*
- * fit() - test if association p is acceptable for synchronization
- */
 func (system *NTPalSystem) fit(association *Association) bool {
-	/*
-	 * A stratum error occurs if (1) the server has never been
-	 * synchronized, (2) the server stratum is invalid.
-	 */
 	if association.Leap == NOSYNC || association.Stratum >= MAXSTRAT {
 		return false
 	}
 
-	/*
-	 * A distance error occurs if the root distance exceeds the
-	 * distance threshold plus an increment equal to one poll
-	 * interval.
-	 */
 	if system.rootDist(association) > float64(MAXDIST)+PHI*ntp.Log2ToDouble(system.poll) {
-		info("Don't fit?:", association.Srcaddr.IP, system.rootDist(association), float64(MAXDIST)+PHI*ntp.Log2ToDouble(system.poll), association.Disp, association.Rootdisp)
 		return false
 	}
 
-	/*
-	 * A loop error occurs if the remote peer is synchronized to the
-	 * local peer or the remote peer is synchronized to the current
-	 * system peer.  Note this is the behavior for IPv4; for IPv6
-	 * the MD5 hash is used instead.
-	 */
 	if association.Refid == ipToRefID(association.Dstaddr.IP) || association.Refid == system.refid {
 		return false
 	}
 
-	/*
-	 * An unreachable error occurs if the server is unreachable.
-	 */
 	if association.Reach == 0 {
 		return false
 	}
@@ -1687,12 +1241,6 @@ func (system *NTPalSystem) fit(association *Association) bool {
 }
 
 func (system *NTPalSystem) rootDist(association *Association) float64 {
-	/*
-	 * The root synchronization distance is the maximum error due to
-	 * all causes of the local clock Relative to the primary server.
-	 * It is defined as half the total delay plus total dispersion
-	 * plus peer jitter.
-	 */
 	return (association.Rootdelay+association.Delay)/2 +
 		association.Rootdisp + association.Disp + PHI*float64(float64(system.Clock.T)-association.Update) + association.Jitter
 }
