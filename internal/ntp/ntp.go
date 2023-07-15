@@ -16,10 +16,20 @@ type Clock struct {
 }
 
 type Association struct {
-	Offset float64
-	Jitter float64
-	Reach  byte
+	Offset        float64
+	Jitter        float64
+	Reach         byte
+	Hostname      string
+	IburstEnabled bool
+	BurstEnabled  bool
+	Rootdelay     float64
+	Rootdisp      float64
+	Delay         float64
+	Disp          float64
+
 	Update float64 // clock.t of the last collected sample
+	Hpoll  int8
+
 	ReceivePacket
 }
 

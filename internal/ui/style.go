@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strconv"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Colors
 var (
@@ -12,8 +16,9 @@ var (
 
 // Text
 var (
-	Title = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(TextWhite).Render
-	Help  = lipgloss.NewStyle().Inline(true).Foreground(TextGray).Render
+	Title      = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(TextWhite).Render
+	Help       = lipgloss.NewStyle().Inline(true).Foreground(TextGray).Render
+	TableFloat = func(num float64) string { return strconv.FormatFloat(num, 'G', 5, 64) }
 )
 
 // Models

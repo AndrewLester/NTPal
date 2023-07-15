@@ -1,4 +1,4 @@
-# NTPal (Network Time Pal) &mdash; Your Network Time Best Friend
+# NTPal (Network Time Pal) &mdash; A Network Time Protocol System
 
 NTPal is an in-development, incomplete, and rough around the edges implementation of an NTP client/server process. It also supports NTP symmetric mode, like any good friend would.
 

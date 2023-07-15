@@ -33,8 +33,8 @@ func (system *NTPalSystem) Query(address string, messages int) (*QueryResult, er
 	}
 	association := &Association{
 		hmode: ntp.CLIENT,
-		hpoll: 0,
 		Association: ntp.Association{
+			Hpoll: 0,
 			ReceivePacket: ntp.ReceivePacket{
 				Srcaddr: addr,
 				Dstaddr: system.address,

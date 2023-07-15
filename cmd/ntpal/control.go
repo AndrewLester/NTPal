@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/rpc"
+	"os"
 	"strconv"
 	"time"
 
@@ -15,7 +17,7 @@ import (
 )
 
 func handleNTPalUI(socket string) {
-	m := ntpalUIModel{socket: socket, table: setupTable()}
+	m := ntpalUIModel{socket: socket, associationTable: setupAssociationTable(), detailTable: setupDetailTable()}
 
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		log.Fatal(err)
@@ -27,7 +29,8 @@ const fetchInfoPeriod = time.Second * 5
 type ntpalUIModel struct {
 	socket string
 
-	table            table.Model
+	associationTable table.Model
+	detailTable      table.Model
 	daemonKillStatus string
 	association      *ntp.Association
 	RPCInfo
@@ -64,12 +67,14 @@ func fetchInfoCommand(m ntpalUIModel) tea.Cmd {
 
 		err := (<-assocCall.Done).Error
 		if err != nil {
-			log.Fatalf("Error getting info from daemon: %v", err)
+			fmt.Printf("Error getting info from daemon: %v", err)
+			os.Exit(1)
 		}
 
 		err = (<-systemCall.Done).Error
 		if err != nil {
-			log.Fatalf("Error getting info from daemon: %v", err)
+			log.Printf("Error getting info from daemon: %v", err)
+			os.Exit(1)
 		}
 
 		return fetchInfoMessage(RPCInfo{
@@ -101,40 +106,89 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			if m.table.Focused() {
-				m.table.Blur()
+			if m.associationTable.Focused() {
+				m.associationTable.Blur()
 			} else {
-				m.table.Focus()
+				m.associationTable.Focus()
 			}
 		case "enter":
-			return m, tea.Printf("Let's go to %s!", m.table.SelectedRow()[1])
+			if !m.associationTable.Focused() {
+				return m, nil
+			}
+
+			ipAddr := m.associationTable.SelectedRow()[0]
+			for _, association := range m.associations {
+				if association.Srcaddr.IP.String() == ipAddr {
+					m.association = association
+					break
+				}
+			}
+
+			m.detailTable.SetRows([]table.Row{{"Loading...", ""}})
+			m.detailTable.SetHeight(1)
+
+			return m, fetchInfoCommand(m)
 		case "stop", "s":
 			m.daemonKillStatus = "Stopping ntpald"
 			return m, tea.Sequence(stopDaemonCommand(), tea.Quit)
-		case "ctrl+c", "q":
+		case "q":
+			if m.association != nil {
+				m.association = nil
+				return m, nil
+			}
+			fallthrough
+		case "ctrl+c":
 			return m, tea.Quit
 		}
 
 		var cmd tea.Cmd
-		m.table, cmd = m.table.Update(msg)
+		if m.association != nil {
+			m.detailTable, cmd = m.detailTable.Update(msg)
+		} else {
+			m.associationTable, cmd = m.associationTable.Update(msg)
+		}
 		return m, cmd
 	case dialSocketMessage:
 		client = msg
 		return m, tickCommand(0)
 	case fetchInfoMessage:
 		m.RPCInfo = RPCInfo(msg)
+
+		// Detail table
+		if m.association != nil {
+			rows := []table.Row{}
+			rows = append(rows,
+				table.Row{"Hostname", m.association.Hostname},
+				table.Row{"IP", m.association.Srcaddr.IP.String()},
+				table.Row{"Offset (ms)", ui.TableFloat(m.association.Offset * 1e3)},
+				table.Row{"Poll", (time.Duration(ntp.Log2ToDouble(int8(math.Max(float64(m.association.Poll), float64(m.association.Hpoll))))) * time.Second).String()},
+				table.Row{"Reach", strconv.FormatUint(uint64(m.association.Reach), 2)},
+				table.Row{"Root delay", ui.TableFloat(m.association.Rootdelay)},
+				table.Row{"Root dispersion", ui.TableFloat(m.association.Rootdisp)},
+				table.Row{"Delay", ui.TableFloat(m.association.Delay)},
+				table.Row{"Dispersion", ui.TableFloat(m.association.Disp)},
+				table.Row{"initial burst", strconv.FormatBool(m.association.IburstEnabled)},
+				table.Row{"burst", strconv.FormatBool(m.association.BurstEnabled)},
+			)
+			m.detailTable.SetRows(rows)
+			m.detailTable.SetHeight(len(rows))
+		}
+
+		// Association table
+		m.associationTable.SetHeight(len(m.associations))
 		rows := []table.Row{}
 		for _, association := range m.associations {
 			row := table.Row{
 				association.Srcaddr.IP.String(),
-				strconv.FormatFloat(association.Offset*1e3, 'G', 5, 64),
+				ui.TableFloat(association.Offset * 1e3),
 				strconv.FormatUint(uint64(association.Reach), 2),
-				strconv.FormatFloat(association.Jitter*1e3, 'G', 5, 64),
+				ui.TableFloat(association.Jitter * 1e3),
 				fmt.Sprintf("%s ago", time.Duration(uint64(float64(m.system.Clock.T)-association.Update))*time.Second),
 			}
 			rows = append(rows, row)
 		}
-		m.table.SetRows(rows)
+		m.associationTable.SetRows(rows)
+
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(tickCommand(fetchInfoPeriod), fetchInfoCommand(m))
@@ -145,28 +199,51 @@ func (m ntpalUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m ntpalUIModel) View() (s string) {
 	s += ui.Title("NTPal") + "\n"
-	s += ui.TableBase(m.table.View()) + "\n\n"
+
+	if m.association != nil {
+		s += ui.TableBase(m.detailTable.View()) + "\n\n"
+	} else {
+		s += ui.TableBase(m.associationTable.View()) + "\n\n"
+	}
+
 	if m.daemonKillStatus != "" {
 		s += m.daemonKillStatus + "\n"
 	} else {
-		s += ui.Help("q: exit, s: stop daemon") + "\n"
+		tableAction := "focus table"
+		if m.associationTable.Focused() {
+			tableAction = "exit table"
+		}
+		historyAction := "quit"
+		if m.association != nil {
+			historyAction = "back"
+		}
+		s += ui.Help(fmt.Sprintf("q: %s, esc: %s, s: stop daemon", historyAction, tableAction)) + "\n"
 	}
 	return
 }
 
-func setupTable() table.Model {
+func setupAssociationTable() table.Model {
 	columns := []table.Column{
 		{Title: "Address", Width: 20},
 		{Title: "Offset (ms)", Width: 15},
 		{Title: "Reach", Width: 15},
-		{Title: "Error", Width: 15},
+		{Title: "Error (ms)", Width: 15},
 		{Title: "Last Update", Width: 20},
 	}
+	return setupTable(columns, []table.Option{table.WithFocused(true)}, true)
+}
 
+func setupDetailTable() table.Model {
+	columns := []table.Column{
+		{Title: "Property", Width: 15},
+		{Title: "Value", Width: 30},
+	}
+	return setupTable(columns, nil, false)
+}
+
+func setupTable(columns []table.Column, opts []table.Option, selection bool) table.Model {
 	t := table.New(
-		table.WithColumns(columns),
-		table.WithFocused(true),
-		table.WithHeight(4),
+		append(opts, table.WithColumns(columns), table.WithHeight(4))...,
 	)
 
 	s := table.DefaultStyles()
@@ -175,10 +252,16 @@ func setupTable() table.Model {
 		BorderForeground(ui.TableGray).
 		BorderBottom(true).
 		Bold(true)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("230")).
-		Background(lipgloss.Color("34")).
-		Bold(false)
+
+	if selection {
+		s.Selected = s.Selected.
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("34")).
+			Bold(false)
+	} else {
+		s.Selected = s.Selected.Foreground(lipgloss.Color("white")).Bold(false)
+	}
+
 	t.SetStyles(s)
 
 	return t

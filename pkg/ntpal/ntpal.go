@@ -166,22 +166,15 @@ type Association struct {
 
 	ntp.Association
 
-	// Override Rootdelay and Rootdisp to make them floats
-	Rootdelay float64
-	Rootdisp  float64
-
 	/*
 	 * Computed data
 	 */
-	t     float64             /* clock.T of last used sample */
-	f     [NSTAGE]FilterStage /* clock Filter */
-	delay float64             /* peer delay */
-	disp  float64             /* peer dispersion */
+	t float64             /* clock.T of last used sample */
+	f [NSTAGE]FilterStage /* clock Filter */
 
 	/*
 	 * Poll process variables
 	 */
-	hpoll    int8
 	burst    int
 	ttl      int
 	unreach  int
@@ -190,12 +183,8 @@ type Association struct {
 	maxpoll  int8
 	minpoll  int8
 
-	hostname string
-
-	burstEnabled  bool
-	iburstEnabled bool
-	isMany        bool // manycast client association
-	ephemeral     bool
+	isMany    bool // manycast client association
+	ephemeral bool
 }
 
 type Chime struct { /* m is for Marzullo */
@@ -323,12 +312,12 @@ func (system *NTPalSystem) Start() {
 func (system *NTPalSystem) setupAssociations(associationConfigs []serverAssociationConfig) {
 	for _, associationConfig := range associationConfigs {
 		association := &Association{
-			hmode:    associationConfig.hmode,
-			hpoll:    int8(associationConfig.minpoll),
-			hostname: associationConfig.hostname,
-			maxpoll:  int8(associationConfig.maxpoll),
-			minpoll:  int8(associationConfig.minpoll),
+			hmode:   associationConfig.hmode,
+			maxpoll: int8(associationConfig.maxpoll),
+			minpoll: int8(associationConfig.minpoll),
 			Association: ntp.Association{
+				Hpoll:    int8(associationConfig.minpoll),
+				Hostname: associationConfig.hostname,
 				ReceivePacket: ntp.ReceivePacket{
 					Srcaddr: associationConfig.address,
 					Dstaddr: system.address,
@@ -339,8 +328,8 @@ func (system *NTPalSystem) setupAssociations(associationConfigs []serverAssociat
 		}
 		system.clear(association, INIT)
 
-		association.burstEnabled = associationConfig.burst
-		association.iburstEnabled = associationConfig.iburst
+		association.BurstEnabled = associationConfig.burst
+		association.IburstEnabled = associationConfig.iburst
 
 		system.associations = append(system.associations, association)
 	}
@@ -514,7 +503,7 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 	 *
 	 * If broadcasting, just do it, but only if we are synchronized.
 	 */
-	hpoll := association.hpoll
+	hpoll := association.Hpoll
 	if association.hmode == ntp.BROADCAST_SERVER {
 		association.outdate = int32(system.Clock.T)
 		if system.association != nil {
@@ -571,7 +560,7 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 			 * burst only if enabled and the unreach
 			 * threshold has not been reached.
 			 */
-			if association.iburstEnabled && association.unreach == 0 {
+			if association.IburstEnabled && association.unreach == 0 {
 				association.burst = BCOUNT
 			}
 
@@ -579,9 +568,9 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 				association.unreach++
 			} else {
 				// Try to get a new IP
-				addr, err := net.ResolveUDPAddr("udp", association.hostname+":123")
+				addr, err := net.ResolveUDPAddr("udp", association.Hostname+":123")
 				if err != nil {
-					log.Fatal("Invalid address: ", association.hostname)
+					log.Fatal("Invalid address: ", association.Hostname)
 				}
 				if association.Srcaddr == addr {
 					hpoll++
@@ -597,7 +586,7 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 			 */
 			association.unreach = 0
 			hpoll = system.poll
-			if association.burstEnabled && system.fit(association) {
+			if association.BurstEnabled && system.fit(association) {
 				association.burst = BCOUNT
 			}
 		}
@@ -756,7 +745,7 @@ func (system *NTPalSystem) process(association *Association, packet ntp.ReceiveP
 		return /* invalid header values */
 	}
 
-	system.pollUpdate(association, association.hpoll)
+	system.pollUpdate(association, association.Hpoll)
 	association.Reach |= 1
 
 	/*
@@ -854,7 +843,7 @@ func (system *NTPalSystem) pollPeer(association *Association) {
 	} else {
 		transmitPacket.Stratum = system.stratum
 	}
-	transmitPacket.Poll = association.hpoll
+	transmitPacket.Poll = association.Hpoll
 	transmitPacket.Precision = system.precision
 	transmitPacket.Rootdelay = ntp.ShortEncoded(system.rootdelay * NTPShortLength)
 	transmitPacket.Rootdisp = ntp.ShortEncoded(system.rootdisp * NTPShortLength)
@@ -890,7 +879,7 @@ func (system *NTPalSystem) pollPeer(association *Association) {
 }
 
 func (system *NTPalSystem) pollUpdate(association *Association, poll int8) {
-	association.hpoll = int8(math.Max(math.Min(float64(association.maxpoll), float64(poll)), float64(association.minpoll)))
+	association.Hpoll = int8(math.Max(math.Min(float64(association.maxpoll), float64(poll)), float64(association.minpoll)))
 	if association.burst > 0 {
 		if uint64(association.nextdate) != system.Clock.T {
 			return
@@ -899,9 +888,9 @@ func (system *NTPalSystem) pollUpdate(association *Association, poll int8) {
 		}
 	} else {
 		// info("Next date based on poll:", 1<<int32(math.Max(math.Min(float64(association.Poll),
-		// 	float64(association.hpoll)), float64(MINPOLL))), association.Poll, association.hpoll)
+		// 	float64(association.Hpoll)), float64(MINPOLL))), association.Poll, association.Hpoll)
 		association.nextdate = association.outdate + (1 << int32(math.Max(math.Min(float64(association.Poll),
-			float64(association.hpoll)), float64(MINPOLL))))
+			float64(association.Hpoll)), float64(MINPOLL))))
 	}
 
 	if uint64(association.nextdate) <= system.Clock.T {
@@ -936,10 +925,10 @@ func (system *NTPalSystem) clear(association *Association, kiss AssociationState
 	association.Update = 0
 	association.f = [NSTAGE]FilterStage{}
 	association.Offset = 0
-	association.delay = 0
-	association.disp = 0
+	association.Delay = 0
+	association.Disp = 0
 	association.Jitter = 0
-	association.hpoll = 0
+	association.Hpoll = 0
 	association.burst = 0
 	association.Reach = 0
 	association.unreach = 0
@@ -948,8 +937,8 @@ func (system *NTPalSystem) clear(association *Association, kiss AssociationState
 	association.Leap = NOSYNC
 	association.Stratum = MAXSTRAT
 	association.Poll = association.maxpoll
-	association.hpoll = association.minpoll
-	association.disp = MAXDISP
+	association.Hpoll = association.minpoll
+	association.Disp = MAXDISP
 	association.Jitter = ntp.Log2ToDouble(system.precision)
 	association.Refid = uint32(kiss)
 	for i := 0; i < NSTAGE; i++ {
@@ -1014,10 +1003,10 @@ func (system *NTPalSystem) clockFilter(association *Association, offset float64,
 		m++
 	}
 
-	association.disp = 0
+	association.Disp = 0
 	association.Jitter = 0
 	for i := NSTAGE - 1; i >= 0; i-- {
-		association.disp = 0.5 * (association.disp + f[i].disp)
+		association.Disp = 0.5 * (association.Disp + f[i].disp)
 		if i < m {
 			association.Jitter += math.Pow((f[0].offset - f[i].offset), 2)
 		}
@@ -1030,7 +1019,7 @@ func (system *NTPalSystem) clockFilter(association *Association, offset float64,
 
 	etemp := math.Abs(association.Offset - f[0].offset)
 	association.Offset = f[0].offset
-	association.delay = f[0].delay
+	association.Delay = f[0].delay
 	if m > 1 {
 		association.Jitter /= float64(m - 1)
 	}
@@ -1047,8 +1036,8 @@ func (system *NTPalSystem) clockFilter(association *Association, offset float64,
 	 * less than twice the system poll interval, dump the spike.
 	 * Otherwise, and if not in a burst, shake out the truechimers.
 	 */
-	if association.disp < float64(MAXDIST) && f[0].disp < float64(MAXDIST) && etemp > SGATE*association.Jitter && (float64(f[0].t)-
-		association.t) < float64(2*ntp.Log2ToDouble(association.hpoll)) {
+	if association.Disp < float64(MAXDIST) && f[0].disp < float64(MAXDIST) && etemp > SGATE*association.Jitter && (float64(f[0].t)-
+		association.t) < float64(2*ntp.Log2ToDouble(association.Hpoll)) {
 		info("Popcorn spike suppresor failed, either offset change WAY above jitter or disp too high")
 		return
 	}
@@ -1352,11 +1341,11 @@ func (system *NTPalSystem) clockUpdate(association *Association) {
 			system.refid = ipToRefID(association.Srcaddr.IP)
 		}
 		system.reftime = association.Reftime
-		system.rootdelay = association.Rootdelay + association.delay
-		dtemp := math.Max(association.Rootdisp+association.disp+system.jitter+PHI*(float64(system.Clock.T)-association.Update)+
+		system.rootdelay = association.Rootdelay + association.Delay
+		dtemp := math.Max(association.Rootdisp+association.Disp+system.jitter+PHI*(float64(system.Clock.T)-association.Update)+
 			math.Abs(association.Offset), MINDISP)
 		system.rootdisp = dtemp
-		fmt.Println("Root disp calc:", association.disp, association.Rootdisp)
+		fmt.Println("Root disp calc:", association.Disp, association.Rootdisp)
 	/*
 	 * Some samples are discarded while, for instance, a direct
 	 * frequency measurement is being made.
@@ -1674,7 +1663,7 @@ func (system *NTPalSystem) fit(association *Association) bool {
 	 * interval.
 	 */
 	if system.rootDist(association) > float64(MAXDIST)+PHI*ntp.Log2ToDouble(system.poll) {
-		info("Don't fit?:", association.Srcaddr.IP, system.rootDist(association), float64(MAXDIST)+PHI*ntp.Log2ToDouble(system.poll), association.disp, association.Rootdisp)
+		info("Don't fit?:", association.Srcaddr.IP, system.rootDist(association), float64(MAXDIST)+PHI*ntp.Log2ToDouble(system.poll), association.Disp, association.Rootdisp)
 		return false
 	}
 
@@ -1705,8 +1694,8 @@ func (system *NTPalSystem) rootDist(association *Association) float64 {
 	 * It is defined as half the total delay plus total dispersion
 	 * plus peer jitter.
 	 */
-	return (association.Rootdelay+association.delay)/2 +
-		association.Rootdisp + association.disp + PHI*float64(float64(system.Clock.T)-association.Update) + association.Jitter
+	return (association.Rootdelay+association.Delay)/2 +
+		association.Rootdisp + association.Disp + PHI*float64(float64(system.Clock.T)-association.Update) + association.Jitter
 }
 
 func (system *NTPalSystem) GetAssociations() []*ntp.Association {
