@@ -12,6 +12,7 @@ WORKDIR /app
 COPY . /app/
 RUN rm -rf .git
 RUN go version
+ENV VERSION="${git describe --tags $(git rev-list --tags --max-count=1)}"
 RUN make
 
 CMD ["overmind", "start"]
