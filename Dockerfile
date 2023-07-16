@@ -10,9 +10,7 @@ RUN apt-get update && \
 RUN go install github.com/DarthSim/overmind/v2@latest
 WORKDIR /app
 COPY . /app/
-RUN rm -rf .git
 RUN go version
-ENV VERSION="${git describe --tags $(git rev-list --tags --max-count=1)}"
-RUN make
+RUN export VERSION=$(git describe --tags $(git rev-list --tags --max-count=1)); make
 
 CMD ["overmind", "start"]
