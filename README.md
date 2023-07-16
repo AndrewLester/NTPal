@@ -12,6 +12,8 @@ The code for NTPal is _very_ similar to pseudocode provided in the [NTPv4 RFC](h
 
 The NTPal binary (`ntpal`) can be downloaded for MacOS or Linux via the [most recent GitHub release](https://github.com/AndrewLester/NTPal/releases/latest).
 
+Once the daemon (`ntpald`) is started, running the binary again will open a terminal UI to see the program's operating status.
+
 ### [time.andrewlester.net](https://time.andrewlester.net)
 
 [time.andrewlester.net](https://time.andrewlester.net) is the canonical server running NTPal for anyone to synchronize with. It does not support symmetric synchronization.
