@@ -3,7 +3,6 @@ package ntpal
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -1029,7 +1028,7 @@ func (system *NTPalSystem) clockUpdate(association *Association) {
 		dtemp := math.Max(association.Rootdisp+association.Disp+system.Jitter+PHI*(float64(system.Clock.T)-association.Update)+
 			math.Abs(association.Offset), MINDISP)
 		system.Rootdisp = dtemp
-		fmt.Println("Root disp calc:", association.Disp, association.Rootdisp)
+		info("Root disp calc:", association.Disp, association.Rootdisp, association.f)
 
 	case IGNORE:
 		info("Discipline IGNORED")
