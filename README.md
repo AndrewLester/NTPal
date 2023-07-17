@@ -2,6 +2,8 @@
 
 NTPal is an in-development, incomplete, and rough around the edges implementation of an NTP client/server process.
 
+<img width="787" alt="NTPal Association Terminal UI Table" src="https://github.com/AndrewLester/NTPal/assets/23221268/ce2aad94-730d-4217-8753-e418919af641">
+
 ## Code Credits
 
 The code for NTPal is _very_ similar to pseudocode provided in the [NTPv4 RFC](https://datatracker.ietf.org/doc/html/rfc5905), which is nicely documented and made for a good rewriting experience. Certain changes were made based on more recent additions to projects such as [ntpd](https://github.com/ntp-project/ntp), [chrony](https://github.com/mlichvar/chrony), and others. Additionally, some care was taken to map the program's requirements into better-fit Golang structures, but there's room for improvement (especially regarding race conditions).
