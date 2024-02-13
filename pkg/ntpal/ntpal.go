@@ -49,7 +49,7 @@ const MAXFREQ = 500e-6 /* frequency tolerance (500 ppm) */
 const PGATE = 4        /* poll-adjust gate */
 
 const MTU = 1300
-const PRECISION = -18 /* precision (log2 s)  */
+const PRECISION = -25 /* precision (log2 s)  */
 
 const STARTUP_OFFSET_MAX = 5e-4 // Exit holding phase if abs(offset) is less than this
 
@@ -480,6 +480,7 @@ func (system *NTPalSystem) sendPoll(association *Association) {
 				}
 				association.Srcaddr = addr
 				association.unreach = 0
+				hpoll = association.minpoll
 			}
 		} else {
 			association.unreach = 0
